@@ -2,7 +2,7 @@
 
 Git-based cargo binary package-manager with support for incremental (compilation) updates.
 
-It'll use the latest git commit as the latest version.
+It'll use the latest git commit as the latest version and cache the repositories.
 
 ## Dependencies
 

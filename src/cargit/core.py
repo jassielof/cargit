@@ -1,7 +1,3 @@
-"""
-Core functionality for git operations, building, and installation
-"""
-
 import os
 import subprocess
 import urllib.parse
@@ -117,7 +113,7 @@ def get_remote_commit(repo_path: Path, branch: str) -> str:
     return result.stdout.strip()
 
 
-def get_binary_name_from_cargo(repo_path: Path) -> str:
+def get_binary_name_from_cargo(repo_path: Path, crate_name: str | None = None) -> str:
     """Extract binary name from Cargo.toml"""
     cargo_toml = repo_path / "Cargo.toml"
     if not cargo_toml.exists():
@@ -127,24 +123,172 @@ def get_binary_name_from_cargo(repo_path: Path) -> str:
         # For Python >= 3.11
         import tomllib
 
+        use_tomllib = True
+
         with open(cargo_toml, "rb") as f:
             cargo_data = tomllib.load(f)
     except ImportError:
         # For Python < 3.11
         import tomlkit
 
+        use_tomllib = False
+
         with open(cargo_toml, "r", encoding="utf-8") as f:
             cargo_data = tomlkit.load(f)
 
-    # Check for [[bin]] section first
-    if "bin" in cargo_data and cargo_data["bin"]:
-        return cargo_data["bin"][0]["name"]
+    # Handle workspace configurations
+    if "workspace" in cargo_data:
+        if crate_name is None:
+            # Try to get from default-members first
+            if "default-members" in cargo_data["workspace"]:
+                default_member = cargo_data["workspace"]["default-members"][0]
+                # Extract crate name from path (e.g., "crates/typst-cli" -> "typst-cli")
+                crate_name = Path(default_member).name
+            else:
+                # List available workspace members
+                members = cargo_data["workspace"].get("members", [])
+                expanded_members = _expand_workspace_members(repo_path, members)
+                available_crates = _get_available_crates_from_members(
+                    repo_path, expanded_members
+                )
+                raise CargitError(
+                    f"This is a workspace with multiple crates. Please specify which crate to install.\n"
+                    f"Available crates: {', '.join(available_crates)}\n"
+                    f"Usage: cargit install <git_url> <crate_name>"
+                )
 
-    # Fallback to package name
-    if "package" in cargo_data and "name" in cargo_data["package"]:
-        return cargo_data["package"]["name"]
+        # Expand workspace members (handle glob patterns like "crates/*")
+        members = cargo_data["workspace"].get("members", [])
+        expanded_members = _expand_workspace_members(repo_path, members)
+
+        # Look for the specific crate in workspace members
+        crate_path = None
+
+        # Find the crate path that matches the crate name
+        for member_path_str in expanded_members:
+            member_path = repo_path / member_path_str
+            member_cargo = member_path / "Cargo.toml"
+
+            if member_cargo.exists():
+                try:
+                    if use_tomllib:
+                        with open(member_cargo, "rb") as f:
+                            member_data = tomllib.load(f)
+                    else:
+                        with open(member_cargo, "r", encoding="utf-8") as f:
+                            member_data = tomlkit.load(f)
+
+                    if (
+                        "package" in member_data
+                        and member_data["package"].get("name") == crate_name
+                    ):
+                        crate_path = member_path
+                        break
+                except Exception:
+                    continue
+
+        if crate_path is None:
+            available_crates = _get_available_crates_from_members(
+                repo_path, expanded_members
+            )
+            raise CargitError(
+                f"Crate '{crate_name}' not found in workspace.\n"
+                f"Available crates: {', '.join(available_crates)}"
+            )
+
+        # Get binary name from the specific crate's Cargo.toml
+        crate_cargo = crate_path / "Cargo.toml"
+        try:
+            if use_tomllib:
+                with open(crate_cargo, "rb") as f:
+                    crate_data = tomllib.load(f)
+            else:
+                with open(crate_cargo, "r", encoding="utf-8") as f:
+                    crate_data = tomlkit.load(f)
+
+            # Check for [[bin]] section first
+            if "bin" in crate_data and crate_data["bin"]:
+                return crate_data["bin"][0]["name"]
+
+            # Fallback to package name
+            if "package" in crate_data and "name" in crate_data["package"]:
+                return crate_data["package"]["name"]
+
+        except Exception as e:
+            raise CargitError(f"Could not read crate Cargo.toml: {e}")
+
+    else:
+        # Regular single-crate repository
+        if crate_name is not None:
+            rprint(
+                f"[yellow]Warning: Crate name '{crate_name}' specified but this is not a workspace. Ignoring.[/yellow]"
+            )
+
+        # Check for [[bin]] section first
+        if "bin" in cargo_data and cargo_data["bin"]:
+            return cargo_data["bin"][0]["name"]
+
+        # Fallback to package name
+        if "package" in cargo_data and "name" in cargo_data["package"]:
+            return cargo_data["package"]["name"]
 
     raise CargitError("Could not determine binary name from Cargo.toml")
+
+
+def _expand_workspace_members(repo_path: Path, members: list[str]) -> list[str]:
+    """Expand workspace member patterns like 'crates/*' to actual paths"""
+    import glob
+
+    expanded = []
+    for member in members:
+        if "*" in member:
+            # Handle glob patterns
+            pattern = repo_path / member
+            matches = glob.glob(str(pattern))
+            for match in matches:
+                # Convert back to relative path
+                rel_path = Path(match).relative_to(repo_path)
+                expanded.append(str(rel_path))
+        else:
+            expanded.append(member)
+
+    return expanded
+
+
+def _get_available_crates_from_members(
+    repo_path: Path, members: list[str]
+) -> list[str]:
+    """Get list of available crate names from workspace members"""
+    try:
+        # For Python >= 3.11
+        import tomllib
+
+        use_tomllib = True
+    except ImportError:
+        # For Python < 3.11
+        import tomlkit
+
+        use_tomllib = False
+
+    available_crates = []
+    for member in members:
+        member_path = repo_path / member
+        member_cargo = member_path / "Cargo.toml"
+        if member_cargo.exists():
+            try:
+                if use_tomllib:
+                    with open(member_cargo, "rb") as f:
+                        member_data = tomllib.load(f)
+                else:
+                    with open(member_cargo, "r", encoding="utf-8") as f:
+                        member_data = tomlkit.load(f)
+
+                if "package" in member_data:
+                    available_crates.append(member_data["package"]["name"])
+            except Exception:
+                continue
+
+    return available_crates
 
 
 def clone_repository(git_url: str, branch: str | None = None) -> tuple[Path, str]:
@@ -192,17 +336,25 @@ def clone_repository(git_url: str, branch: str | None = None) -> tuple[Path, str
     return repo_path, branch
 
 
-def build_binary(repo_path: Path) -> Path:
+def build_binary(repo_path: Path, crate_name: str | None = None) -> Path:
     """Build the binary with cargo"""
     rprint("[blue]Building with cargo...[/blue]")
-    run_command(["cargo", "build", "--release"], cwd=repo_path)
+
+    # Build command
+    build_cmd = ["cargo", "build", "--release"]
+
+    # If specific crate is specified, add it to the build command
+    if crate_name:
+        build_cmd.extend(["--package", crate_name])
+
+    run_command(build_cmd, cwd=repo_path)
 
     target_dir = repo_path / "target" / "release"
     if not target_dir.exists():
         raise CargitError("Build directory not found")
 
     # Find the binary (usually the same name as the package)
-    binary_name = get_binary_name_from_cargo(repo_path)
+    binary_name = get_binary_name_from_cargo(repo_path, crate_name)
     binary_path = target_dir / binary_name
 
     if not binary_path.exists():
@@ -214,6 +366,9 @@ def build_binary(repo_path: Path) -> Path:
         ]
         if executables:
             binary_path = executables[0]
+            rprint(
+                f"[yellow]Expected binary '{binary_name}' not found, using '{binary_path.name}' instead[/yellow]"
+            )
         else:
             raise CargitError(f"Built binary not found in {target_dir}")
 

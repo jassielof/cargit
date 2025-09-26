@@ -1,7 +1,3 @@
-"""
-CLI commands implementation
-"""
-
 import sys
 from pathlib import Path
 
@@ -27,6 +23,9 @@ app = typer.Typer(help="Git-based cargo binary installer with incremental update
 @app.command()
 def install(
     git_url: str = typer.Argument(..., help="Git repository URL"),
+    crate: str | None = typer.Argument(
+        None, help="Crate name (for workspaces with multiple crates)"
+    ),
     branch: str | None = typer.Option(None, "--branch", help="Branch to track"),
     name: str | None = typer.Option(None, "--name", help="Alias for installed binary"),
     dir_path: str | None = typer.Option(None, "--dir", help="Install directory"),
@@ -42,13 +41,13 @@ def install(
         if name is None:
             from .core import get_binary_name_from_cargo
 
-            name = get_binary_name_from_cargo(repo_path)
+            name = get_binary_name_from_cargo(repo_path, crate)
 
         # Determine install directory
         install_dir = Path(dir_path) if dir_path else BIN_DIR
 
         # Build binary
-        binary_path = build_binary(repo_path)
+        binary_path = build_binary(repo_path, crate)
 
         # Install binary
         install_binary(binary_path, name, install_dir)
@@ -62,6 +61,7 @@ def install(
             "install_dir": str(install_dir),
             "bin_path": str(binary_path),
             "alias": name,
+            "crate": crate,
         }
         save_metadata(metadata)
 
@@ -94,7 +94,8 @@ def update(
 
         targets = []
         if all:
-            targets = list(metadata["installed"].keys())
+            # Use the built-in list() function explicitly
+            targets = __builtins__["list"](metadata["installed"].keys())
         elif name:
             if name not in metadata["installed"]:
                 rprint(f"[red]Error: Binary '{name}' not found[/red]")
@@ -113,7 +114,7 @@ def update(
                 )
                 # Reinstall
                 repo_path, _ = clone_repository(info["repo_url"], info.get("branch"))
-                binary_path = build_binary(repo_path)
+                binary_path = build_binary(repo_path, info.get("crate"))
                 install_binary(binary_path, binary_name, Path(info["install_dir"]))
 
                 # Update metadata
@@ -140,7 +141,7 @@ def update(
                 )
 
                 # Rebuild and reinstall
-                binary_path = build_binary(repo_path)
+                binary_path = build_binary(repo_path, info.get("crate"))
                 install_binary(binary_path, binary_name, Path(info["install_dir"]))
 
                 # Update metadata
@@ -156,8 +157,8 @@ def update(
         sys.exit(1)
 
 
-@app.command()
-def list():
+@app.command("list")
+def list_binaries():
     """List installed binaries"""
     metadata = load_metadata()
 
