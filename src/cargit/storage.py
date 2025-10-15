@@ -6,6 +6,7 @@ from rich import print as rprint
 from .core import CARGIT_DIR
 
 METADATA_FILE = CARGIT_DIR / "metadata.toml"
+# TODO: Make the git repo more efficient by using bare clone or another faster clone, and on every pull or update, also try to remove/reset to the latest commit to avoid storing unnecessary history.
 
 
 def load_metadata() -> dict[str, Any]:
