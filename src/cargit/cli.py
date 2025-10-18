@@ -32,7 +32,9 @@ def install(
         None, help="Crate name (for workspaces with multiple crates)"
     ),
     branch: str | None = typer.Option(None, "--branch", help="Branch to track"),
-    alias: str | None = typer.Option(None, "--alias", help="Alias for installed binary"),
+    alias: str | None = typer.Option(
+        None, "--alias", help="Alias for installed binary"
+    ),
     dir_path: str | None = typer.Option(None, "--dir", help="Install directory"),
 ):
     """Install a Rust binary from git repository"""

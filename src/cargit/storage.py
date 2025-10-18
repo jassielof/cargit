@@ -1,5 +1,4 @@
 import sqlite3
-from pathlib import Path
 from typing import Any
 
 from .core import CARGIT_DIR

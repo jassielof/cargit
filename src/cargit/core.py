@@ -291,54 +291,135 @@ def _get_available_crates_from_members(
     return available_crates
 
 
+def _is_shallow_repo(repo_path: Path) -> bool:
+    """Check if repository is a shallow clone"""
+    shallow_file = repo_path / ".git" / "shallow"
+    return shallow_file.exists()
+
+
+def _convert_to_shallow(repo_path: Path, branch: str):
+    """Convert existing repo to shallow clone"""
+    rprint("[blue]Converting to shallow clone to save disk space...[/blue]")
+    try:
+        # Create a new shallow clone with depth 1
+        run_command(
+            ["git", "fetch", "--depth=1", "origin", f"{branch}:{branch}"],
+            cwd=repo_path,
+        )
+
+        # Reset to the fetched branch
+        run_command(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
+
+        # Clean up unreferenced objects
+        run_command(["git", "gc", "--aggressive", "--prune=all"], cwd=repo_path)
+
+    except CargitError as e:
+        rprint(f"[yellow]Warning: Could not convert to shallow clone: {e}[/yellow]")
+
+
 def clone_repository(git_url: str, branch: str | None = None) -> tuple[Path, str]:
-    """Clone repository with optimization for single branch"""
+    """Clone repository with optimization for minimal disk usage
+
+    Unlike 'cargo install', this keeps the repository and build cache intact,
+    enabling fast incremental updates. The repository uses shallow cloning
+    (only latest commit) to minimize git history size.
+    """
     repo_path = get_repo_path(git_url)
 
     if repo_path.exists():
-        # Repository already exists, just fetch
-        rprint(f"[blue]Repository already exists at {repo_path}[/blue]")
-        run_command(["git", "fetch", "origin"], cwd=repo_path)
+        # Repository already exists
+        rprint(f"[blue]Repository exists at {repo_path}[/blue]")
 
+        # Determine the branch to use
         if branch is None:
             branch = get_default_branch(repo_path)
 
-        # Reset to latest commit to avoid conflicts
-        current_commit = get_current_commit(repo_path)
-        remote_commit = get_remote_commit(repo_path, branch)
+        try:
+            # Fetch latest changes (shallow fetch if possible)
+            if _is_shallow_repo(repo_path):
+                rprint("[blue]Fetching latest changes (shallow)...[/blue]")
+                run_command(
+                    ["git", "fetch", "--depth=1", "origin", branch],
+                    cwd=repo_path,
+                )
+            else:
+                rprint("[blue]Fetching latest changes...[/blue]")
+                run_command(["git", "fetch", "origin", branch], cwd=repo_path)
+                # Optionally convert to shallow to save space
+                _convert_to_shallow(repo_path, branch)
 
-        if current_commit != remote_commit:
-            rprint(f"[blue]Updating to latest commit on {branch}[/blue]")
-            run_command(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
+            # Get current and remote commits
+            current_commit = get_current_commit(repo_path)
+            remote_commit = get_remote_commit(repo_path, branch)
+
+            if current_commit != remote_commit:
+                rprint(f"[blue]Updating to latest commit on {branch}[/blue]")
+                # Hard reset to remote branch, discarding all local changes
+                # This preserves the target/ directory with build cache
+                run_command(
+                    ["git", "reset", "--hard", f"origin/{branch}"],
+                    cwd=repo_path,
+                )
+                # Clean untracked files but preserve target/ directory
+                # Note: target/ is in .gitignore so it won't be affected by git clean
+                run_command(
+                    ["git", "clean", "-fdx"],
+                    cwd=repo_path,
+                )
+            else:
+                rprint("[green]Repository is already up to date[/green]")
+
+        except CargitError as e:
+            rprint(
+                f"[yellow]Warning: Update failed, will use existing state: {e}[/yellow]"
+            )
 
         return repo_path, branch
 
-    # Clone repository
+    # Clone repository with minimal disk usage
     repo_path.parent.mkdir(parents=True, exist_ok=True)
 
-    clone_cmd = ["git", "clone"]
+    # Use shallow clone with depth 1 and single branch
+    clone_cmd = [
+        "git",
+        "clone",
+        "--depth=1",  # Only fetch the latest commit
+        "--single-branch",  # Only fetch the specified branch
+        "--no-tags",  # Don't fetch tags to save space
+    ]
 
     if branch:
-        # Clone specific branch only for faster cloning
-        clone_cmd.extend(["--single-branch", "--branch", branch])
-    else:
-        # Clone with minimal history for faster cloning
-        clone_cmd.append("--depth=1")
+        clone_cmd.extend(["--branch", branch])
 
     clone_cmd.extend([git_url, str(repo_path)])
 
-    rprint(f"[blue]Cloning repository: {git_url}[/blue]")
+    rprint(f"[blue]Cloning repository (shallow): {git_url}[/blue]")
     run_command(clone_cmd)
 
+    # Determine actual branch after cloning
     if branch is None:
         branch = get_default_branch(repo_path)
+
+    # Run garbage collection to optimize disk space
+    rprint("[blue]Optimizing disk space...[/blue]")
+    run_command(["git", "gc", "--aggressive", "--prune=all"], cwd=repo_path)
 
     return repo_path, branch
 
 
 def build_binary(repo_path: Path, crate_name: str | None = None) -> Path:
-    """Build the binary with cargo"""
-    rprint("[blue]Building with cargo...[/blue]")
+    """Build the binary with cargo, preserving build cache for fast updates
+
+    Unlike 'cargo install' which removes the repo after building, this keeps
+    the repository and target/ directory intact. This means:
+    - First build: Compiles all dependencies from scratch
+    - Subsequent builds with no changes: Near-instant (cache hit)
+    - Updates with changes: Only recompiles changed code and dependencies
+
+    This dependency reuse makes updates significantly faster, especially for
+    large projects with many dependencies.
+    """
+    rprint("[blue]Building with cargo (reusing cached dependencies)...[/blue]")
 
     # Build command
     build_cmd = ["cargo", "build", "--release"]
