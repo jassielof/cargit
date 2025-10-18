@@ -475,3 +475,122 @@ def install_binary(binary_path: Path, alias: str, install_dir: Path):
         rprint(
             f'[yellow]Add this to your shell profile: export PATH="{install_dir}:$PATH"[/yellow]'
         )
+
+
+def update_repository(
+    repo_path: Path,
+    branch: str | None = None,
+    commit: str | None = None,
+    tag: str | None = None,
+) -> tuple[str, bool]:
+    """Update repository to specific branch, commit, or tag
+
+    Returns:
+        tuple[str, bool]: (actual_branch, was_updated)
+    """
+    # Determine what we're updating to
+    if commit:
+        rprint(f"[blue]Updating to commit: {commit}[/blue]")
+        target_ref = commit
+        target_type = "commit"
+    elif tag:
+        rprint(f"[blue]Updating to tag: {tag}[/blue]")
+        target_ref = f"refs/tags/{tag}"
+        target_type = "tag"
+    else:
+        # Branch (default behavior)
+        if branch is None:
+            branch = get_default_branch(repo_path)
+        rprint(f"[blue]Updating branch: {branch}[/blue]")
+        target_ref = branch
+        target_type = "branch"
+
+    # Get current commit before update
+    current_commit_hash = get_current_commit(repo_path)
+
+    # Fetch based on target type
+    if target_type == "commit":
+        # For specific commit, we might need to unshallow first
+        if _is_shallow_repo(repo_path):
+            rprint("[blue]Unshallowing repository to fetch specific commit...[/blue]")
+            try:
+                # Try to fetch the specific commit
+                run_command(
+                    ["git", "fetch", "origin", commit],
+                    cwd=repo_path,
+                )
+            except CargitError:
+                # If that fails, unshallow completely (this will use more disk space)
+                rprint("[yellow]Fetching all history to find commit...[/yellow]")
+                run_command(
+                    ["git", "fetch", "--unshallow", "origin"],
+                    cwd=repo_path,
+                )
+        else:
+            run_command(["git", "fetch", "origin"], cwd=repo_path)
+
+        # Checkout the specific commit
+        run_command(["git", "checkout", commit], cwd=repo_path)
+
+        # Return a pseudo-branch name for tracking
+        actual_branch = f"detached-{commit[:8]}"
+
+    elif target_type == "tag":
+        # Fetch tags
+        if _is_shallow_repo(repo_path):
+            rprint("[blue]Fetching tag (shallow)...[/blue]")
+            run_command(
+                ["git", "fetch", "--depth=1", "origin", f"tag {tag}"],
+                cwd=repo_path,
+            )
+        else:
+            run_command(["git", "fetch", "origin", f"tag {tag}"], cwd=repo_path)
+
+        # Checkout the tag
+        run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
+
+        # Return tag name as branch for tracking
+        actual_branch = f"tag-{tag}"
+
+    else:
+        # Branch update (default shallow behavior)
+        if _is_shallow_repo(repo_path):
+            rprint("[blue]Fetching latest changes (shallow)...[/blue]")
+            run_command(
+                ["git", "fetch", "--depth=1", "origin", branch],
+                cwd=repo_path,
+            )
+        else:
+            rprint("[blue]Fetching latest changes...[/blue]")
+            run_command(["git", "fetch", "origin", branch], cwd=repo_path)
+            # Optionally convert to shallow to save space
+            _convert_to_shallow(repo_path, branch)
+
+        # Get remote commit
+        remote_commit_hash = get_remote_commit(repo_path, branch)
+
+        # Check if update is needed
+        if current_commit_hash == remote_commit_hash:
+            return branch, False
+
+        # Update to latest commit on branch
+        run_command(
+            ["git", "reset", "--hard", f"origin/{branch}"],
+            cwd=repo_path,
+        )
+
+        actual_branch = branch
+
+    # Clean untracked files (preserves target/ directory)
+    run_command(["git", "clean", "-fdx"], cwd=repo_path)
+
+    # Check if we actually changed commits
+    new_commit_hash = get_current_commit(repo_path)
+    was_updated = current_commit_hash != new_commit_hash
+
+    if was_updated:
+        rprint(
+            f"[green]Updated from {current_commit_hash[:8]} to {new_commit_hash[:8]}[/green]"
+        )
+
+    return actual_branch, was_updated
