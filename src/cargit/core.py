@@ -523,7 +523,7 @@ def update_repository(
             # Tag exists, check if we're already on it
             if current_commit_hash == tag_commit:
                 rprint(f"[green]Already on tag {tag}[/green]")
-                return f"tag-{tag}", False
+                return f"tag:{tag}", False
 
             # Tag exists but we're not on it, just checkout
             rprint(f"[blue]Checking out existing tag {tag}...[/blue]")
@@ -697,8 +697,10 @@ def update_repository(
 
         actual_branch = branch
 
-    # Clean untracked files (preserves target/ directory)
-    run_command(["git", "clean", "-fdx"], cwd=repo_path)
+    # Clean untracked files but preserve target/ and other build artifacts
+    # Use -f (force) and -d (directories) but NOT -x (don't remove ignored files)
+    # This preserves target/, .cargo/, and other ignored build caches
+    run_command(["git", "clean", "-fd"], cwd=repo_path)
 
     # Check if we actually changed commits
     new_commit_hash = get_current_commit(repo_path)

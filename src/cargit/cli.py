@@ -150,15 +150,15 @@ def update(
 
         for binary_alias in targets:
             info = metadata["installed"][binary_alias]
+            stored_branch = info.get("branch", "")
 
             # Skip pinned commits/tags when using --all
             if all:
-                stored_branch = info.get("branch", "")
                 if stored_branch.startswith("commit:") or stored_branch.startswith(
                     "tag:"
                 ):
                     rprint(
-                        f"[yellow]Skipping {binary_alias} (pinned to {stored_branch})[/yellow]"
+                        f"[yellow]Skipping {binary_alias} (pinned to specific commit/tag)[/yellow]"
                     )
                     continue
 
@@ -170,7 +170,6 @@ def update(
                     f"[yellow]Repository missing for {binary_alias}, reinstalling...[/yellow]"
                 )
                 # Extract branch from stored info if it's a regular branch
-                stored_branch = info.get("branch", "")
                 reinstall_branch = None
 
                 if not stored_branch.startswith(
@@ -204,27 +203,29 @@ def update(
                     target_tag = tag
                 else:
                     # No explicit target, use stored info
-                    stored_branch = info["branch"]
-
                     # Parse stored branch info
                     if stored_branch.startswith("commit:"):
-                        # Format: "commit:branch:hash"
-                        parts = stored_branch.split(":")
-                        if len(parts) == 3:
-                            target_branch = parts[1] if parts[1] != "detached" else None
-                        else:
-                            target_branch = None
-                        target_commit = None
-                        target_tag = None
-                    elif stored_branch.startswith("tag:"):
-                        # Format: "tag:tagname"
-                        target_branch = None
-                        target_commit = None
-                        target_tag = (
-                            None  # Don't update tags unless explicitly requested
+                        # Pinned to commit - don't update unless explicit
+                        # This should have been caught by the skip logic above for --all
+                        # For individual updates, stay on the pinned commit
+                        rprint(
+                            f"[yellow]{binary_alias} is pinned to a specific commit[/yellow]"
                         )
+                        rprint(
+                            "[yellow]Use explicit --branch, --commit, or --tag to change[/yellow]"
+                        )
+                        continue
+                    elif stored_branch.startswith("tag:"):
+                        # Pinned to tag - don't update unless explicit
+                        rprint(
+                            "[yellow]{binary_alias} is pinned to a specific tag[/yellow]"
+                        )
+                        rprint(
+                            "[yellow]Use explicit --branch, --commit, or --tag to change[/yellow]"
+                        )
+                        continue
                     else:
-                        # Regular branch
+                        # Regular branch - update to latest
                         target_branch = stored_branch
                         target_commit = None
                         target_tag = None
