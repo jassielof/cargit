@@ -92,15 +92,22 @@ def update(
     ),
     tag: str | None = typer.Option(None, "--tag", help="Update to specific tag"),
 ):
-    """
-    Update installed binaries
+    """Update installed binaries
+
+    Update behavior:\n
+    - Branch only: Update to latest HEAD of that branch\n
+    - Commit only: Pin to that commit (on current branch)\n
+    - Branch + Commit: Pin to that commit (tracked on that branch)\n
+    - Tag only: Pin to that tag\n
+    - --all: Updates only branch-tracked binaries (skips pinned commits/tags)
 
     Examples:\n
-    - cargit update --all                    # Update all to latest\n
-    - cargit update typst                    # Update typst to latest\n
-    - cargit update typst --branch dev       # Switch to dev branch\n
-    - cargit update typst --commit abc123    # Pin to specific commit\n
-    - cargit update typst --tag v0.11.0      # Update to specific tag
+    - cargit update --all                    # Update all branch-tracked binaries\n
+    - cargit update typst                    # Update typst to latest on its branch\n
+    - cargit update typst --branch dev       # Switch to dev branch (latest)\n
+    - cargit update typst --commit abc123    # Pin to commit abc123\n
+    - cargit update typst --branch dev --commit abc123  # Pin to commit on dev branch\n
+    - cargit update typst --tag v0.11.0      # Pin to tag v0.11.0
     """
     try:
         ensure_dirs()
@@ -127,11 +134,9 @@ def update(
             sys.exit(1)
 
         # Cannot specify multiple targets
-        target_count = sum([bool(branch), bool(commit), bool(tag)])
+        target_count = sum([bool(commit), bool(tag)])
         if target_count > 1:
-            rprint(
-                "[red]Error: Can only specify one of --branch, --commit, or --tag[/red]"
-            )
+            rprint("[red]Error: Can only specify one of --commit or --tag[/red]")
             sys.exit(1)
 
         targets = []
@@ -144,18 +149,38 @@ def update(
             targets = [alias]
 
         for binary_alias in targets:
-            rprint(f"[blue]Checking {binary_alias}...[/blue]")
-
             info = metadata["installed"][binary_alias]
+
+            # Skip pinned commits/tags when using --all
+            if all:
+                stored_branch = info.get("branch", "")
+                if stored_branch.startswith("commit:") or stored_branch.startswith(
+                    "tag:"
+                ):
+                    rprint(
+                        f"[yellow]Skipping {binary_alias} (pinned to {stored_branch})[/yellow]"
+                    )
+                    continue
+
+            rprint(f"[blue]Checking {binary_alias}...[/blue]")
             repo_path = get_repo_path(info["repo_url"])
 
             if not repo_path.exists():
                 rprint(
                     f"[yellow]Repository missing for {binary_alias}, reinstalling...[/yellow]"
                 )
+                # Extract branch from stored info if it's a regular branch
+                stored_branch = info.get("branch", "")
+                reinstall_branch = None
+
+                if not stored_branch.startswith(
+                    "commit:"
+                ) and not stored_branch.startswith("tag:"):
+                    reinstall_branch = stored_branch
+
                 # Reinstall
                 repo_path, new_branch = clone_repository(
-                    info["repo_url"], info.get("branch")
+                    info["repo_url"], reinstall_branch
                 )
                 binary_path = build_binary(repo_path, info.get("crate"))
                 install_binary(binary_path, binary_alias, Path(info["install_dir"]))
@@ -172,9 +197,37 @@ def update(
                 )
             else:
                 # Determine target (branch, commit, or tag)
-                target_branch = branch if branch else info["branch"]
-                target_commit = commit
-                target_tag = tag
+                if tag or commit or branch:
+                    # User explicitly specified what to update to
+                    target_branch = branch
+                    target_commit = commit
+                    target_tag = tag
+                else:
+                    # No explicit target, use stored info
+                    stored_branch = info["branch"]
+
+                    # Parse stored branch info
+                    if stored_branch.startswith("commit:"):
+                        # Format: "commit:branch:hash"
+                        parts = stored_branch.split(":")
+                        if len(parts) == 3:
+                            target_branch = parts[1] if parts[1] != "detached" else None
+                        else:
+                            target_branch = None
+                        target_commit = None
+                        target_tag = None
+                    elif stored_branch.startswith("tag:"):
+                        # Format: "tag:tagname"
+                        target_branch = None
+                        target_commit = None
+                        target_tag = (
+                            None  # Don't update tags unless explicitly requested
+                        )
+                    else:
+                        # Regular branch
+                        target_branch = stored_branch
+                        target_commit = None
+                        target_tag = None
 
                 # Update repository
                 new_branch, updated = update_repository(
@@ -288,8 +341,13 @@ def rename(
 
 
 @app.command()
-def remove(alias: str = typer.Option(..., "--alias", help="Alias of binary to remove")):
-    """Remove installed binary"""
+def remove(alias: str = typer.Argument(..., help="Alias of binary to remove")):
+    """Remove installed binary
+
+    Examples:
+        cargit remove typst
+        cargit remove my-tool
+    """
     try:
         ensure_dirs()
         info = get_binary_metadata(alias)
@@ -323,8 +381,13 @@ def remove(alias: str = typer.Option(..., "--alias", help="Alias of binary to re
 
 
 @app.command()
-def which(alias: str = typer.Option(..., "--alias", help="Alias of binary to locate")):
-    """Show absolute path to installed binary"""
+def which(alias: str = typer.Argument(..., help="Alias of binary to locate")):
+    """Show absolute path to installed binary
+
+    Examples:
+        cargit which typst
+        cargit which my-tool
+    """
     info = get_binary_metadata(alias)
 
     if info is None:

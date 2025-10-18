@@ -485,29 +485,170 @@ def update_repository(
 ) -> tuple[str, bool]:
     """Update repository to specific branch, commit, or tag
 
+    Behavior:
+    - Only branch: Update to latest HEAD of that branch
+    - Only commit: Switch to that commit on current branch (detached state)
+    - Branch + commit: Switch to that commit, track as on that branch
+    - Only tag: Switch to that tag (detached state)
+
     Returns:
         tuple[str, bool]: (actual_branch, was_updated)
     """
+    # Get current commit before update
+    current_commit_hash = get_current_commit(repo_path)
+
     # Determine what we're updating to
-    if commit:
-        rprint(f"[blue]Updating to commit: {commit}[/blue]")
-        target_ref = commit
-        target_type = "commit"
-    elif tag:
-        rprint(f"[blue]Updating to tag: {tag}[/blue]")
-        target_ref = f"refs/tags/{tag}"
+    if tag:
+        # Tag takes precedence
         target_type = "tag"
+    elif commit:
+        target_type = "commit"
     else:
-        # Branch (default behavior)
+        # Branch update (default)
         if branch is None:
             branch = get_default_branch(repo_path)
         target_type = "branch"
 
-    # Get current commit before update
-    current_commit_hash = get_current_commit(repo_path)
+    # Handle each update type
+    if target_type == "tag":
+        # For tags, check if we already have it
+        try:
+            # Try to verify if the tag exists locally
+            tag_commit = run_command(
+                ["git", "rev-list", "-n", "1", f"tags/{tag}"],
+                cwd=repo_path,
+                capture_output=True,
+            ).stdout.strip()
 
-    # For branch updates, check if we need to fetch at all
-    if target_type == "branch":
+            # Tag exists, check if we're already on it
+            if current_commit_hash == tag_commit:
+                rprint(f"[green]Already on tag {tag}[/green]")
+                return f"tag-{tag}", False
+
+            # Tag exists but we're not on it, just checkout
+            rprint(f"[blue]Checking out existing tag {tag}...[/blue]")
+            run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
+
+        except CargitError:
+            # Tag doesn't exist locally, need to fetch
+            rprint(f"[blue]Fetching tag {tag}...[/blue]")
+            if _is_shallow_repo(repo_path):
+                run_command(
+                    [
+                        "git",
+                        "fetch",
+                        "--depth=1",
+                        "origin",
+                        f"refs/tags/{tag}:refs/tags/{tag}",
+                    ],
+                    cwd=repo_path,
+                )
+            else:
+                run_command(
+                    ["git", "fetch", "origin", f"refs/tags/{tag}:refs/tags/{tag}"],
+                    cwd=repo_path,
+                )
+
+            # Checkout the tag
+            run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
+
+        # Return tag name as branch for tracking
+        actual_branch = f"tag:{tag}"
+
+    elif target_type == "commit":
+        # Determine which branch context to use
+        if branch is None:
+            # No branch specified, try to get current branch
+            try:
+                current_branch_result = run_command(
+                    ["git", "symbolic-ref", "--short", "HEAD"],
+                    cwd=repo_path,
+                    capture_output=True,
+                )
+                branch = current_branch_result.stdout.strip()
+            except CargitError:
+                # We're in detached state, try to extract branch from metadata
+                # For now, we'll mark it as detached
+                branch = "detached"
+
+        # Check if commit exists locally
+        try:
+            run_command(
+                ["git", "cat-file", "-e", commit],
+                cwd=repo_path,
+                capture_output=True,
+            )
+            commit_exists_locally = True
+        except CargitError:
+            commit_exists_locally = False
+
+        # Check if we're already on this commit
+        if current_commit_hash == commit:
+            rprint(f"[green]Already on commit {commit[:8]}[/green]")
+            return f"commit:{branch}:{commit[:8]}", False
+
+        if not commit_exists_locally:
+            # Need to fetch the commit
+            if _is_shallow_repo(repo_path):
+                rprint(
+                    "[blue]Fetching specific commit (may need to unshallow)...[/blue]"
+                )
+
+                # Try shallow fetch first with the branch
+                if branch and branch != "detached":
+                    try:
+                        run_command(
+                            ["git", "fetch", "--depth=50", "origin", branch],
+                            cwd=repo_path,
+                        )
+                        # Check if we got the commit
+                        run_command(
+                            ["git", "cat-file", "-e", commit],
+                            cwd=repo_path,
+                            capture_output=True,
+                        )
+                        commit_exists_locally = True
+                    except CargitError:
+                        pass
+
+                if not commit_exists_locally:
+                    # Fetch with increasing depth
+                    rprint(
+                        "[yellow]Commit not in recent history, fetching more...[/yellow]"
+                    )
+                    try:
+                        run_command(
+                            ["git", "fetch", "--deepen=100", "origin"],
+                            cwd=repo_path,
+                        )
+                        run_command(
+                            ["git", "cat-file", "-e", commit],
+                            cwd=repo_path,
+                            capture_output=True,
+                        )
+                        commit_exists_locally = True
+                    except CargitError:
+                        # Last resort: unshallow completely
+                        rprint(
+                            "[yellow]Unshallowing repository to find commit...[/yellow]"
+                        )
+                        run_command(
+                            ["git", "fetch", "--unshallow", "origin"],
+                            cwd=repo_path,
+                        )
+            else:
+                # Full repo, just fetch normally
+                rprint(f"[blue]Fetching to get commit {commit[:8]}...[/blue]")
+                run_command(["git", "fetch", "origin"], cwd=repo_path)
+
+        # Checkout the commit
+        rprint(f"[blue]Checking out commit {commit[:8]}...[/blue]")
+        run_command(["git", "checkout", commit], cwd=repo_path)
+
+        # Return tracking info with branch context
+        actual_branch = f"commit:{branch}:{commit[:8]}"
+
+    else:  # branch update
         # Try to get the remote commit hash without fetching
         try:
             remote_commit_hash = get_remote_commit(repo_path, branch)
@@ -555,90 +696,6 @@ def update_repository(
         )
 
         actual_branch = branch
-
-    elif target_type == "commit":
-        # For specific commit, check if we already have it
-        try:
-            # Try to verify if the commit exists locally
-            run_command(
-                ["git", "cat-file", "-e", commit],
-                cwd=repo_path,
-                capture_output=True,
-            )
-
-            # Commit exists, check if we're already on it
-            if current_commit_hash == commit:
-                rprint(f"[green]Already on commit {commit[:8]}[/green]")
-                return f"detached-{commit[:8]}", False
-
-            # Commit exists but we're not on it, just checkout
-            rprint(f"[blue]Checking out existing commit {commit[:8]}...[/blue]")
-            run_command(["git", "checkout", commit], cwd=repo_path)
-
-        except CargitError:
-            # Commit doesn't exist locally, need to fetch
-            if _is_shallow_repo(repo_path):
-                rprint(
-                    "[blue]Unshallowing repository to fetch specific commit...[/blue]"
-                )
-                try:
-                    # Try to fetch the specific commit
-                    run_command(
-                        ["git", "fetch", "origin", commit],
-                        cwd=repo_path,
-                    )
-                except CargitError:
-                    # If that fails, unshallow completely (this will use more disk space)
-                    rprint("[yellow]Fetching all history to find commit...[/yellow]")
-                    run_command(
-                        ["git", "fetch", "--unshallow", "origin"],
-                        cwd=repo_path,
-                    )
-            else:
-                rprint(f"[blue]Fetching commit {commit[:8]}...[/blue]")
-                run_command(["git", "fetch", "origin"], cwd=repo_path)
-
-            # Checkout the specific commit
-            run_command(["git", "checkout", commit], cwd=repo_path)
-
-        # Return a pseudo-branch name for tracking
-        actual_branch = f"detached-{commit[:8]}"
-
-    elif target_type == "tag":
-        # For tags, check if we already have it
-        try:
-            # Try to verify if the tag exists locally
-            tag_commit = run_command(
-                ["git", "rev-list", "-n", "1", f"tags/{tag}"],
-                cwd=repo_path,
-                capture_output=True,
-            ).stdout.strip()
-
-            # Tag exists, check if we're already on it
-            if current_commit_hash == tag_commit:
-                rprint(f"[green]Already on tag {tag}[/green]")
-                return f"tag-{tag}", False
-
-            # Tag exists but we're not on it, just checkout
-            rprint(f"[blue]Checking out existing tag {tag}...[/blue]")
-            run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
-
-        except CargitError:
-            # Tag doesn't exist locally, need to fetch
-            rprint(f"[blue]Fetching tag {tag}...[/blue]")
-            if _is_shallow_repo(repo_path):
-                run_command(
-                    ["git", "fetch", "--depth=1", "origin", f"tag {tag}"],
-                    cwd=repo_path,
-                )
-            else:
-                run_command(["git", "fetch", "origin", f"tag {tag}"], cwd=repo_path)
-
-            # Checkout the tag
-            run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
-
-        # Return tag name as branch for tracking
-        actual_branch = f"tag-{tag}"
 
     # Clean untracked files (preserves target/ directory)
     run_command(["git", "clean", "-fdx"], cwd=repo_path)
