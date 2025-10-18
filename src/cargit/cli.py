@@ -96,11 +96,11 @@ def update(
     Update installed binaries
 
     Examples:\n
-        cargit update --all                    # Update all to latest\n
-        cargit update typst                    # Update typst to latest\n
-        cargit update typst --branch dev       # Switch to dev branch\n
-        cargit update typst --commit abc123    # Pin to specific commit\n
-        cargit update typst --tag v0.11.0      # Update to specific tag\n
+    - cargit update --all                    # Update all to latest\n
+    - cargit update typst                    # Update typst to latest\n
+    - cargit update typst --branch dev       # Switch to dev branch\n
+    - cargit update typst --commit abc123    # Pin to specific commit\n
+    - cargit update typst --tag v0.11.0      # Update to specific tag
     """
     try:
         ensure_dirs()
