@@ -497,6 +497,16 @@ def update_repository(
     # Get current commit before update
     current_commit_hash = get_current_commit(repo_path)
 
+    # Always fetch first to ensure remote refs are up-to-date
+    # This is cheap and prevents incorrect "up-to-date" messages
+    try:
+        if _is_shallow_repo(repo_path):
+            run_command(["git", "fetch", "--depth=1", "origin"], cwd=repo_path)
+        else:
+            run_command(["git", "fetch", "origin"], cwd=repo_path)
+    except CargitError as e:
+        rprint(f"[yellow]Warning: Could not fetch remote updates: {e}[/yellow]")
+
     # Determine what we're updating to
     if tag:
         # Tag takes precedence
@@ -661,6 +671,7 @@ def update_repository(
                 return branch, False
         except CargitError:
             # Remote reference doesn't exist locally, need to fetch
+            # This case is now less likely due to the fetch at the start, but kept for safety
             pass
 
         rprint(f"[blue]Checking for updates on branch: {branch}[/blue]")
