@@ -148,7 +148,7 @@ def update(
                 sys.exit(1)
             targets = [alias]
 
-        # TODO: Improve update for all packages to be parallelized
+        # TODO: Improve update for all packages to be parallelized (both git fetch and cargo build)
         for binary_alias in targets:
             info = metadata["installed"][binary_alias]
             stored_branch = info.get("branch", "")
