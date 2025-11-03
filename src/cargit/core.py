@@ -10,7 +10,6 @@ CARGIT_DIR = Path.home() / ".cargit"
 REPOS_DIR = CARGIT_DIR / "repos"
 BIN_DIR = CARGIT_DIR / "bin"
 
-
 class CargitError(Exception):
     """Custom exception for cargit operations"""
 

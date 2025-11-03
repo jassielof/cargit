@@ -1,18 +1,18 @@
 # Cargit
 
-Git-based cargo binary package-manager with support for incremental (compilation) updates.
-
-It'll use the latest git commit as the latest version and cache the repositories.
+Git-based cargo package-manager with the benefit of reusing compiled dependencies artifacts via cached repositories.
 
 ## Dependencies
 
+These must be installed on your system, and discoverable in your shell.
+
 - Git
-- Rust (cargo)
+- Rust's Cargo
 
 ## Installation
 
-Use astral/uv to install from git: `uv tool install <repository-url>`.
+Use astral/uv to install from git.
 
 ## Usage
 
-Usage should be self-explanatory. Run `cargit --help` for more information.
+Similar to Cargo, but using git repositories as sources fully.
