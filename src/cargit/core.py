@@ -10,6 +10,7 @@ CARGIT_DIR = Path.home() / ".cargit"
 REPOS_DIR = CARGIT_DIR / "repos"
 BIN_DIR = CARGIT_DIR / "bin"
 
+
 class CargitError(Exception):
     """Custom exception for cargit operations"""
 
@@ -722,3 +723,78 @@ def update_repository(
         )
 
     return actual_branch, was_updated
+
+
+def check_for_updates(
+    repo_path: Path,
+    branch: str | None = None,
+    commit: str | None = None,
+    tag: str | None = None,
+) -> tuple[bool, str]:
+    """Check if updates are available without applying them.
+
+    Args:
+        repo_path: Path to git repository
+        branch: Branch to check (if None, uses current branch)
+        commit: Specific commit to check
+        tag: Specific tag to check
+
+    Returns:
+        Tuple of (has_update, remote_commit_hash)
+    """
+    import subprocess
+
+    # Fetch latest changes
+    subprocess.run(
+        ["git", "fetch", "--all"], cwd=repo_path, check=True, capture_output=True
+    )
+
+    # Get current commit
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    current_commit = result.stdout.strip()
+
+    # Determine target commit
+    if commit:
+        # Check specific commit
+        remote_commit = commit
+    elif tag:
+        # Check specific tag
+        result = subprocess.run(
+            ["git", "rev-parse", f"refs/tags/{tag}"],
+            cwd=repo_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        remote_commit = result.stdout.strip()
+    else:
+        # Check branch HEAD
+        if branch is None:
+            # Get current branch
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            branch = result.stdout.strip()
+
+        # Get remote commit
+        result = subprocess.run(
+            ["git", "rev-parse", f"origin/{branch}"],
+            cwd=repo_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        remote_commit = result.stdout.strip()
+
+    has_update = current_commit != remote_commit
+    return has_update, remote_commit

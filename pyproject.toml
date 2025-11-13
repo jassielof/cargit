@@ -1,9 +1,9 @@
 [project]
 name = "cargit"
 version = "0.1.0"
-description = "Git-based cargo binary installer with incremental (compilation) updates"
+description = "Git-based cargo binary installer with cached repositories for faster updates"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 authors = [{ name = "Jassiel Ovando", email = "jassielovando@protonmail.com" }]
 dependencies = [
   "tomlkit>=0.13.3",

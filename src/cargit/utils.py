@@ -8,12 +8,12 @@ console = Console()
 
 def display_installed_table(installed: dict[str, Any]):
     """Display installed binaries in a formatted table"""
-    table = Table(title="Installed Binaries")
+    table = Table(title="Installed binaries", )
     table.add_column("Alias", style="cyan", no_wrap=True)
-    table.add_column("Repo URL", style="blue")
+    table.add_column("Repository URL", style="blue", highlight=True)
     table.add_column("Branch/Ref", style="green")
     table.add_column("Commit", style="yellow")
-    table.add_column("Install Dir", style="magenta")
+    table.add_column("Installation directory", style="magenta")
 
     for alias, info in installed.items():
         branch_display = info["branch"]

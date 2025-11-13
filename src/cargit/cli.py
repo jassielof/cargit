@@ -23,16 +23,19 @@ from cargit.storage import (
 from cargit.utils import display_installed_table
 from cargit.core import BIN_DIR
 
-app = typer.Typer(help="Git-based cargo binary installer with incremental updates")
+app = typer.Typer(
+    help="Git-based cargo binary installer with cached repositories for faster updates",
+    no_args_is_help=True,
+)
 
 
-@app.command()
+@app.command(no_args_is_help=True)
 def install(
     git_url: str = typer.Argument(..., help="Git repository URL"),
     crate: str | None = typer.Argument(
         None, help="Crate name (for workspaces with multiple crates)"
     ),
-    branch: str | None = typer.Option(None, "--branch", help="Branch to track"),
+    branch: str | None = typer.Option(None, "--branch", help="Branch to install from"),
     alias: str | None = typer.Option(
         None, "--alias", help="Alias for installed binary"
     ),
@@ -78,36 +81,35 @@ def install(
         sys.exit(1)
 
 
-@app.command()
+@app.command(no_args_is_help=True)
 def update(
     alias: str | None = typer.Argument(
         None, help="Alias of binary to update (omit for --all)"
     ),
-    all: bool = typer.Option(False, "--all", help="Update all installed binaries"),
+    all: bool = typer.Option(
+        False,
+        "--all",
+        help="Update all installed binaries to its latest branch commit (HEAD), skipping pinned commits/tags",
+    ),
     branch: str | None = typer.Option(
-        None, "--branch", help="Switch to a different branch"
+        None,
+        "--branch",
+        help="Switch to given branch and update to its latest commit (HEAD)",
     ),
     commit: str | None = typer.Option(
-        None, "--commit", help="Update to specific commit hash"
+        None,
+        "--commit",
+        help="Update and pin to specific commit hash from current branch unless --branch is also specified",
     ),
-    tag: str | None = typer.Option(None, "--tag", help="Update to specific tag"),
+    tag: str | None = typer.Option(
+        None, "--tag", help="Update and pin to specific tag"
+    ),
+    check: bool = typer.Option(
+        False, "--check", help="Check (fetch) for updates without applying them"
+    ),
 ):
-    """Update installed binaries
-
-    Update behavior:\n
-    - Branch only: Update to latest HEAD of that branch\n
-    - Commit only: Pin to that commit (on current branch)\n
-    - Branch + Commit: Pin to that commit (tracked on that branch)\n
-    - Tag only: Pin to that tag\n
-    - --all: Updates only branch-tracked binaries (skips pinned commits/tags)
-
-    Examples:\n
-    - cargit update --all                    # Update all branch-tracked binaries\n
-    - cargit update typst                    # Update typst to latest on its branch\n
-    - cargit update typst --branch dev       # Switch to dev branch (latest)\n
-    - cargit update typst --commit abc123    # Pin to commit abc123\n
-    - cargit update typst --branch dev --commit abc123  # Pin to commit on dev branch\n
-    - cargit update typst --tag v0.11.0      # Pin to tag v0.11.0
+    """
+    Update installed binaries
     """
     try:
         ensure_dirs()
@@ -126,8 +128,8 @@ def update(
             rprint("[red]Error: Must specify <alias> or use --all[/red]")
             sys.exit(1)
 
-        # Cannot specify branch/commit/tag with --all
-        if all and (branch or commit or tag):
+        # Cannot specify branch/commit/tag with --all (unless checking)
+        if all and (branch or commit or tag) and not check:
             rprint(
                 "[red]Error: Cannot specify --branch, --commit, or --tag with --all[/red]"
             )
@@ -154,7 +156,7 @@ def update(
             stored_branch = info.get("branch", "")
 
             # Skip pinned commits/tags when using --all
-            if all:
+            if all and not check:
                 if stored_branch.startswith("commit:") or stored_branch.startswith(
                     "tag:"
                 ):
@@ -167,6 +169,12 @@ def update(
             repo_path = get_repo_path(info["repo_url"])
 
             if not repo_path.exists():
+                if check:
+                    rprint(
+                        f"[red]Repository missing for {binary_alias}. Run update without --check to reinstall.[/red]"
+                    )
+                    continue
+
                 rprint(
                     f"[yellow]Repository missing for {binary_alias}, reinstalling...[/yellow]"
                 )
@@ -207,59 +215,90 @@ def update(
                     # Parse stored branch info
                     if stored_branch.startswith("commit:"):
                         # Pinned to commit - don't update unless explicit
-                        # This should have been caught by the skip logic above for --all
-                        # For individual updates, stay on the pinned commit
-                        rprint(
-                            f"[yellow]{binary_alias} is pinned to a specific commit[/yellow]"
-                        )
-                        rprint(
-                            "[yellow]Use explicit --branch, --commit, or --tag to change[/yellow]"
-                        )
-                        continue
+                        if not check:
+                            rprint(
+                                f"[yellow]{binary_alias} is pinned to a specific commit[/yellow]"
+                            )
+                            rprint(
+                                "[yellow]Use explicit --branch, --commit, or --tag to change[/yellow]"
+                            )
+                            continue
+                        else:
+                            # For check mode, skip pinned commits
+                            rprint(
+                                f"[yellow]{binary_alias} is pinned to a specific commit (skipping check)[/yellow]"
+                            )
+                            continue
                     elif stored_branch.startswith("tag:"):
                         # Pinned to tag - don't update unless explicit
-                        rprint(
-                            "[yellow]{binary_alias} is pinned to a specific tag[/yellow]"
-                        )
-                        rprint(
-                            "[yellow]Use explicit --branch, --commit, or --tag to change[/yellow]"
-                        )
-                        continue
+                        if not check:
+                            rprint(
+                                f"[yellow]{binary_alias} is pinned to a specific tag[/yellow]"
+                            )
+                            rprint(
+                                "[yellow]Use explicit --branch, --commit, or --tag to change[/yellow]"
+                            )
+                            continue
+                        else:
+                            # For check mode, skip pinned tags
+                            rprint(
+                                f"[yellow]{binary_alias} is pinned to a specific tag (skipping check)[/yellow]"
+                            )
+                            continue
                     else:
                         # Regular branch - update to latest
                         target_branch = stored_branch
                         target_commit = None
                         target_tag = None
 
-                # Update repository
-                new_branch, updated = update_repository(
-                    repo_path,
-                    target_branch,
-                    target_commit,
-                    target_tag,
-                )
+                if check:
+                    # Check mode: fetch and compare commits
+                    from cargit.core import check_for_updates
 
-                if updated:
-                    rprint(f"[blue]Rebuilding {binary_alias}...[/blue]")
-
-                    # Rebuild and reinstall
-                    binary_path = build_binary(repo_path, info.get("crate"))
-                    install_binary(binary_path, binary_alias, Path(info["install_dir"]))
-
-                    # Update metadata
-                    save_binary_metadata(
-                        alias=binary_alias,
-                        repo_url=info["repo_url"],
-                        branch=new_branch,
-                        commit=get_current_commit(repo_path),
-                        install_dir=info["install_dir"],
-                        bin_path=str(binary_path),
-                        crate=info.get("crate"),
+                    has_update, remote_commit = check_for_updates(
+                        repo_path, target_branch, target_commit, target_tag
                     )
 
-                    rprint(f"[green]Updated {binary_alias}![/green]")
+                    if has_update:
+                        current_commit = info.get("commit", "unknown")[:8]
+                        rprint(
+                            f"[yellow]Update available for {binary_alias}:[/yellow] "
+                            f"{current_commit} -> {remote_commit[:8]}"
+                        )
+                    else:
+                        rprint(f"[green]{binary_alias} is up to date[/green]")
                 else:
-                    rprint(f"[green]{binary_alias} is up to date[/green]")
+                    # Update repository
+                    new_branch, updated = update_repository(
+                        repo_path,
+                        target_branch,
+                        target_commit,
+                        target_tag,
+                    )
+
+                    if updated:
+                        rprint(f"[blue]Rebuilding {binary_alias}...[/blue]")
+
+                        # Rebuild and reinstall
+                        binary_path = build_binary(repo_path, info.get("crate"))
+                        install_binary(
+                            binary_path, binary_alias, Path(info["install_dir"])
+                        )
+
+                        # Update metadata
+                        save_binary_metadata(
+                            alias=binary_alias,
+                            repo_url=info["repo_url"],
+                            branch=new_branch,
+                            commit=get_current_commit(repo_path),
+                            install_dir=info["install_dir"],
+                            bin_path=str(binary_path),
+                            crate=info.get("crate"),
+                        )
+
+                        rprint(f"[green]Updated {binary_alias}![/green]")
+                    else:
+                        rprint(f"[green]{binary_alias} is up to date[/green]")
 
     except CargitError as e:
         rprint(f"[red]Error: {e}[/red]")
@@ -278,16 +317,13 @@ def list_binaries():
     display_installed_table(metadata["installed"])
 
 
-@app.command()
+@app.command(no_args_is_help=True)
 def rename(
     current_alias: str = typer.Argument(..., help="Current alias of the binary"),
     new_alias: str = typer.Option(..., "--to", help="New alias for the binary"),
 ):
-    """Rename an installed binary's alias
-
-    Examples:
-        cargit rename typst-dev --to typst
-        cargit rename old-name --to new-name
+    """
+    Rename an installed binary's alias
     """
     try:
         ensure_dirs()
