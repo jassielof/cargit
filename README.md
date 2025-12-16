@@ -299,3 +299,5 @@ Repositories are cloned with `--depth=1` to minimize disk usage. Only the latest
 ### Build Cache Preservation
 
 The `target/` directory is preserved across updates. Cargo's incremental compilation means only changed code is recompiled.
+
+- [ ]: Set a unified target/build directory for all binaries for more efficient disk usage

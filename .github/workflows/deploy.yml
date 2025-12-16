@@ -1,0 +1,88 @@
+name: Deploy Docs
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    pages: write
+    id-token: write
+
+concurrency:
+    group: pages
+    cancel-in-progress: false
+
+jobs:
+    build-and-deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            # 1. Setup Python & UV for Typer
+            - name: Install uv
+              uses: astral-sh/setup-uv@v5
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.x"
+
+            # 2. Generate CLI Docs & Structure Site
+            - name: Prepare Docs Structure
+              run: |
+                  # Create docs folder (VitePress root)
+                  mkdir -p docs
+
+                  # Copy Readme to index.md (Home page)
+                  cp README.md docs/index.md
+
+                  # Generate CLI docs directly into the docs folder
+                  # REPLACE 'main.py' with your actual entry point
+                  uv run typer src/cargit/cli.py utils docs --name cargit --output docs/cli.md
+
+            # 3. Setup Node & VitePress (The "Prettier" Generator)
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+
+            - name: Install VitePress
+              run: npm install vitepress --no-save
+
+            # 4. Generate a Minimal Config on the fly
+            # This creates the sidebar and title without needing a file in your repo
+            - name: Create VitePress Config
+              run: |
+                  mkdir -p docs/.vitepress
+                  echo "export default {
+                    title: 'Cargit Docs',
+                    description: 'CLI Documentation',
+                    themeConfig: {
+                      nav: [
+                        { text: 'Home', link: '/' },
+                        { text: 'CLI Reference', link: '/cli' }
+                      ],
+                      sidebar: [
+                        {
+                          text: 'Documentation',
+                          items: [
+                            { text: 'Introduction', link: '/' },
+                            { text: 'CLI Reference', link: '/cli' }
+                          ]
+                        }
+                      ]
+                    }
+                  }" > docs/.vitepress/config.mjs
+
+            # 5. Build and Deploy
+            - name: Build with VitePress
+              run: npx vitepress build docs
+
+            - name: Upload artifact
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  path: docs/.vitepress/dist
+
+            - name: Deploy to GitHub Pages
+              uses: actions/deploy-pages@v4
