@@ -56,23 +56,24 @@ jobs:
               run: |
                   mkdir -p docs/.vitepress
                   echo "export default {
-                    title: 'Cargit Docs',
-                    description: 'CLI Documentation',
-                    themeConfig: {
+                  base: '/cargit/',  # ADD THIS LINE - must match your repo name
+                  title: 'Cargit Docs',
+                  description: 'CLI Documentation',
+                  themeConfig: {
                       nav: [
-                        { text: 'Home', link: '/' },
-                        { text: 'CLI Reference', link: '/cli' }
+                      { text: 'Home', link: '/' },
+                      { text: 'CLI Reference', link: '/cli' }
                       ],
                       sidebar: [
-                        {
+                      {
                           text: 'Documentation',
                           items: [
-                            { text: 'Introduction', link: '/' },
-                            { text: 'CLI Reference', link: '/cli' }
+                          { text: 'Introduction', link: '/' },
+                          { text: 'CLI Reference', link: '/cli' }
                           ]
-                        }
+                      }
                       ]
-                    }
+                  }
                   }" > docs/.vitepress/config.mjs
 
             # 5. Build and Deploy
