@@ -56,7 +56,7 @@ jobs:
               run: |
                   mkdir -p docs/.vitepress
                   echo "export default {
-                  base: '/cargit/',  # ADD THIS LINE - must match your repo name
+                  base: '/cargit/',
                   title: 'Cargit Docs',
                   description: 'CLI Documentation',
                   themeConfig: {
