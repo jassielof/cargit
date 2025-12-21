@@ -1,4 +1,4 @@
-"""Configuration management for cargit.
+"""Configuration management for cli.
 
 Handles loading and saving user configuration from config.toml.
 Uses caching for fast repeated access.

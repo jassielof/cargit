@@ -1,4 +1,4 @@
-"""Core functionality for cargit.
+"""Core functionality for cli.
 
 This module contains the main operations for git and cargo management,
 including cloning, building, and updating repositories.
@@ -147,7 +147,7 @@ def _cleanup_old_directory():
         if not OLD_CARGIT_DIR.exists():
             return
         remaining = list(OLD_CARGIT_DIR.iterdir())
-        if not remaining or (len(remaining) == 1 and remaining[0].name == "cargit.db"):
+        if not remaining or (len(remaining) == 1 and remaining[0].name == "cli.db"):
             rprint("[green]Migration completed successfully![/green]")
     except Exception as e:
         rprint(f"[yellow]Warning: Could not clean up old directory: {e}[/yellow]")

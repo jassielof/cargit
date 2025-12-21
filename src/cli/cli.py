@@ -1,4 +1,4 @@
-"""CLI commands for cargit.
+"""CLI commands for cli.
 
 This module provides the command-line interface for cargit,
 including install, update, sync, clean, status, and config commands.
@@ -12,7 +12,7 @@ import typer
 from rich import print as rprint
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
-from cargit.core import (
+from cli.core import (
     CargitError,
     build_binary,
     clone_repository,
@@ -26,13 +26,13 @@ from cargit.core import (
     reset_to_remote,
     BIN_DIR,
 )
-from cargit.storage import (
+from cli.storage import (
     load_metadata,
     save_binary_metadata,
     remove_binary_metadata,
     get_binary_metadata,
 )
-from cargit.utils import display_installed_table
+from cli.utils import display_installed_table
 
 app = typer.Typer(
     help="Git-based cargo binary installer with cached repositories for faster updates",
@@ -62,7 +62,7 @@ def install(
         cargit install https://github.com/sharkdp/fd
         cargit install https://github.com/BurntSushi/ripgrep --alias rg
     """
-    from cargit.storage import get_binaries_by_repo
+    from cli.storage import get_binaries_by_repo
 
     try:
         ensure_dirs()
@@ -275,7 +275,7 @@ def _handle_recovery_paths(
     stored_branch: str,
     check: bool,
 ) -> bool:
-    from cargit.storage import reset_cache_flags
+    from cli.storage import reset_cache_flags
 
     if info.get("repo_deleted", False) and not repo_path.exists():
         if check:
@@ -389,7 +389,7 @@ def _perform_update_check(
     target_tag: str | None,
     info: dict,
 ):
-    from cargit.core import check_for_updates
+    from cli.core import check_for_updates
 
     has_update, remote_commit = check_for_updates(
         repo_path, target_branch, target_commit, target_tag
@@ -572,14 +572,14 @@ def status():
     Examples:
         cargit status
     """
-    from cargit.core import (
+    from cli.core import (
         CACHE_DIR,
         DATA_DIR,
         get_cache_size,
         format_size,
         get_repo_path,
     )
-    from cargit.storage import get_status_summary, get_all_binaries_full
+    from cli.storage import get_status_summary, get_all_binaries_full
     from rich.table import Table
     from rich.panel import Panel
     from rich.console import Console
@@ -615,12 +615,12 @@ def info(
         cargit info https://github.com/typst/typst
         cargit info https://github.com/sharkdp/fd
     """
-    from cargit.core import (
+    from cli.core import (
         get_repo_path,
         _expand_workspace_members,
         _get_available_crates_from_members,
     )
-    from cargit.storage import get_binaries_by_repo
+    from cli.storage import get_binaries_by_repo
     import tempfile
     import shutil
 
@@ -659,7 +659,7 @@ def _prepare_repo_for_info(git_url: str) -> tuple[Path, bool]:
     temp_dir = tempfile.mkdtemp(prefix="cargit_info_")
     repo_path = Path(temp_dir)
 
-    from cargit.core import run_command
+    from cli.core import run_command
 
     run_command(
         ["git", "clone", "--depth=1", "--single-branch", git_url, str(repo_path)]
@@ -874,7 +874,7 @@ def config(
         cargit config --init     # Create config file with defaults
         cargit config --edit     # Open config in $EDITOR
     """
-    from cargit.config import load_config, init_config, CONFIG_FILE
+    from cli.config import load_config, init_config, CONFIG_FILE
     import os
 
     if not any([show, init, edit]):
@@ -1051,7 +1051,7 @@ def clean(
         cargit clean fd --repos          # Delete repo for fd
         cargit clean --orphaned          # Remove untracked repositories
     """
-    from cargit.core import (
+    from cli.core import (
         CACHE_DIR,
         get_repo_path,
         get_cache_size,
@@ -1062,7 +1062,7 @@ def clean(
         copy_binary_to_safe_location,
         find_orphaned_repos,
     )
-    from cargit.storage import mark_artifacts_cleaned, mark_repo_deleted
+    from cli.storage import mark_artifacts_cleaned, mark_repo_deleted
 
     try:
         ensure_dirs()
@@ -1327,7 +1327,7 @@ def sync(
         cargit sync --dry-run        # Preview what would be updated
         cargit sync -j 4             # Use 4 parallel git operations
     """
-    from cargit.core import get_default_branch
+    from cli.core import get_default_branch
 
     try:
         ensure_dirs()
@@ -1542,7 +1542,7 @@ def _safe_default_branch(get_default_branch_fn, item: dict) -> str:
 def _sync_phase_build(updates_needed: list[dict], up_to_date: list[str], get_default_branch_fn):
     rprint(f"\n[bold cyan]Phase 3/3: Building {len(updates_needed)} binaries[/bold cyan]")
 
-    from cargit.storage import reset_cache_flags
+    from cli.storage import reset_cache_flags
 
     built = 0
     failed = 0

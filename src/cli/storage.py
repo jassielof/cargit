@@ -20,7 +20,7 @@ from typing import Any, Generator
 from .core import CONFIG_DIR, OLD_CARGIT_DIR
 
 DATABASE_FILE = CONFIG_DIR / "data.sqlite3"
-OLD_DATABASE_FILE = OLD_CARGIT_DIR / "cargit.db"
+OLD_DATABASE_FILE = OLD_CARGIT_DIR / "cli.db"
 
 # Thread-local storage for database connections
 _local = threading.local()

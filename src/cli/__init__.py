@@ -11,8 +11,8 @@ import atexit
 def main() -> None:
     """Entry point for the cargit CLI."""
     # Lazy import for faster startup
-    from cargit.cli import app
-    from cargit.storage import cleanup_connection
+    from cli.cli import app
+    from cli.storage import cleanup_connection
 
     # Register cleanup handler
     atexit.register(cleanup_connection)
