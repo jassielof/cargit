@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-cargit = "cli:main"
+cargit = "cli:app"
 
 [dependency-groups]
 dev = [
