@@ -20,13 +20,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@main
 
-      - name: Generate CLI docs
-        run: uv run typer src/cli/cli.py utils docs --name cargit --output docs/cli.md
-
       - name: Copy README to docs
         run: |
           mkdir -p docs
           cp README.md docs/index.md
+      - name: Generate CLI docs
+        run: uv run typer src/cli/cli.py utils docs --name cargit --output docs/cli.md
 
       - name: Setup Pages
         uses: actions/configure-pages@main
