@@ -75,65 +75,82 @@ def ensure_dirs():
     """Ensure required directories exist and handle migration from old structure"""
     import shutil
 
-    # Check if migration is needed from old ~/.cargit
-    needs_migration = OLD_CARGIT_DIR.exists() and not CACHE_DIR.exists()
+    if _needs_migration():
+        _migrate_old_layout(shutil)
 
-    if needs_migration:
-        rprint("[blue]Migrating from old ~/.cargit to XDG directories...[/blue]")
+    _create_directory_layout()
 
-        # Create new directories
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        BINARIES_SAFE_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Migrate repos
-        old_repos = OLD_CARGIT_DIR / "repos"
-        if old_repos.exists():
-            rprint(f"[blue]Moving repositories to {CACHE_DIR}...[/blue]")
-            for provider_dir in old_repos.iterdir():
-                if provider_dir.is_dir():
-                    dest = CACHE_DIR / provider_dir.name
-                    if not dest.exists():
-                        shutil.move(str(provider_dir), str(CACHE_DIR))
+def _needs_migration() -> bool:
+    """Return True when ~/.cargit exists but XDG cache is missing."""
+    return OLD_CARGIT_DIR.exists() and not CACHE_DIR.exists()
 
-        # Migrate binaries (symlinks)
-        old_bin = OLD_CARGIT_DIR / "bin"
-        if old_bin.exists():
-            rprint(f"[blue]Moving binaries to {DATA_DIR}...[/blue]")
-            for binary in old_bin.iterdir():
-                dest = DATA_DIR / binary.name
-                if not dest.exists():
-                    if binary.is_symlink():
-                        # Recreate symlink with new target path if needed
-                        target = binary.resolve()
-                        # Update target path if it points to old location
-                        target_str = str(target)
-                        if str(OLD_CARGIT_DIR) in target_str:
-                            new_target = Path(target_str.replace(str(OLD_CARGIT_DIR / "repos"), str(CACHE_DIR)))
-                            dest.symlink_to(new_target)
-                        else:
-                            dest.symlink_to(target)
-                    else:
-                        shutil.move(str(binary), str(dest))
 
-        # Database migration is handled in storage.py
+def _create_directory_layout():
+    for path in (CACHE_DIR, CONFIG_DIR, DATA_DIR, BINARIES_SAFE_DIR):
+        path.mkdir(parents=True, exist_ok=True)
 
-        # Remove old directory after successful migration
-        try:
-            if OLD_CARGIT_DIR.exists():
-                # Only remove if empty or only contains db file (which will be migrated by storage.py)
-                remaining = list(OLD_CARGIT_DIR.iterdir())
-                if not remaining or (len(remaining) == 1 and remaining[0].name == "cargit.db"):
-                    rprint("[green]Migration completed successfully![/green]")
-        except Exception as e:
-            rprint(f"[yellow]Warning: Could not clean up old directory: {e}[/yellow]")
 
-    # Ensure all directories exist
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    BINARIES_SAFE_DIR.mkdir(parents=True, exist_ok=True)
+def _migrate_old_layout(shutil):
+    rprint("[blue]Migrating from old ~/.cargit to XDG directories...[/blue]")
+
+    _create_directory_layout()
+    _migrate_repositories(shutil)
+    _migrate_binaries(shutil)
+    _cleanup_old_directory()
+
+
+def _migrate_repositories(shutil):
+    old_repos = OLD_CARGIT_DIR / "repos"
+    if not old_repos.exists():
+        return
+
+    rprint(f"[blue]Moving repositories to {CACHE_DIR}...[/blue]")
+    for provider_dir in old_repos.iterdir():
+        if not provider_dir.is_dir():
+            continue
+        dest = CACHE_DIR / provider_dir.name
+        if not dest.exists():
+            shutil.move(str(provider_dir), str(CACHE_DIR))
+
+
+def _migrate_binaries(shutil):
+    old_bin = OLD_CARGIT_DIR / "bin"
+    if not old_bin.exists():
+        return
+
+    rprint(f"[blue]Moving binaries to {DATA_DIR}...[/blue]")
+    for binary in old_bin.iterdir():
+        dest = DATA_DIR / binary.name
+        if dest.exists():
+            continue
+        if binary.is_symlink():
+            _recreate_symlink(binary, dest)
+        else:
+            shutil.move(str(binary), str(dest))
+
+
+def _recreate_symlink(binary: Path, dest: Path):
+    target = binary.resolve()
+    target_str = str(target)
+    if str(OLD_CARGIT_DIR) in target_str:
+        new_target = Path(
+            target_str.replace(str(OLD_CARGIT_DIR / "repos"), str(CACHE_DIR))
+        )
+        dest.symlink_to(new_target)
+    else:
+        dest.symlink_to(target)
+
+
+def _cleanup_old_directory():
+    try:
+        if not OLD_CARGIT_DIR.exists():
+            return
+        remaining = list(OLD_CARGIT_DIR.iterdir())
+        if not remaining or (len(remaining) == 1 and remaining[0].name == "cargit.db"):
+            rprint("[green]Migration completed successfully![/green]")
+    except Exception as e:
+        rprint(f"[yellow]Warning: Could not clean up old directory: {e}[/yellow]")
 
 
 def run_command(
@@ -227,124 +244,117 @@ def get_remote_commit(repo_path: Path, branch: str) -> str:
 
 def get_binary_name_from_cargo(repo_path: Path, crate_name: str | None = None) -> str:
     """Extract binary name from Cargo.toml"""
+    cargo_data, use_tomllib = _load_cargo_toml(repo_path)
+
+    if "workspace" in cargo_data:
+        members = cargo_data["workspace"].get("members", [])
+        expanded_members = _expand_workspace_members(repo_path, members)
+        selected_crate = _resolve_workspace_crate_name(
+            cargo_data, repo_path, expanded_members, crate_name
+        )
+        crate_data = _load_workspace_crate(
+            repo_path, expanded_members, selected_crate, use_tomllib
+        )
+    else:
+        if crate_name is not None:
+            rprint(
+                f"[yellow]Warning: Crate name '{crate_name}' specified but this is not a workspace. Ignoring.[/yellow]"
+            )
+        crate_data = cargo_data
+
+    binary_name = _extract_binary_name(crate_data)
+    if binary_name:
+        return binary_name
+
+    raise CargitError("Could not determine binary name from Cargo.toml")
+
+
+def _load_cargo_toml(repo_path: Path) -> tuple[dict, bool]:
     cargo_toml = repo_path / "Cargo.toml"
     if not cargo_toml.exists():
         raise CargitError("No Cargo.toml found in repository")
 
     try:
-        # For Python >= 3.11
         import tomllib
 
-        use_tomllib = True
-
         with open(cargo_toml, "rb") as f:
-            cargo_data = tomllib.load(f)
+            return tomllib.load(f), True
     except ImportError:
-        # For Python < 3.11
         import tomlkit
 
-        use_tomllib = False
-
         with open(cargo_toml, "r", encoding="utf-8") as f:
-            cargo_data = tomlkit.load(f)
+            return tomlkit.load(f), False
 
-    # Handle workspace configurations
-    if "workspace" in cargo_data:
-        if crate_name is None:
-            # Try to get from default-members first
-            if "default-members" in cargo_data["workspace"]:
-                default_member = cargo_data["workspace"]["default-members"][0]
-                # Extract crate name from path (e.g., "crates/typst-cli" -> "typst-cli")
-                crate_name = Path(default_member).name
-            else:
-                # List available workspace members
-                members = cargo_data["workspace"].get("members", [])
-                expanded_members = _expand_workspace_members(repo_path, members)
-                available_crates = _get_available_crates_from_members(
-                    repo_path, expanded_members
-                )
-                raise CargitError(
-                    f"This is a workspace with multiple crates. Please specify which crate to install.\n"
-                    f"Available crates: {', '.join(available_crates)}\n"
-                    f"Usage: cargit install <git_url> <crate_name>"
-                )
 
-        # Expand workspace members (handle glob patterns like "crates/*")
-        members = cargo_data["workspace"].get("members", [])
-        expanded_members = _expand_workspace_members(repo_path, members)
+def _resolve_workspace_crate_name(
+    cargo_data: dict, repo_path: Path, expanded_members: list[str], crate_name: str | None
+) -> str:
+    if crate_name:
+        return crate_name
 
-        # Look for the specific crate in workspace members
-        crate_path = None
+    default_members = cargo_data["workspace"].get("default-members", [])
+    if default_members:
+        return Path(default_members[0]).name
 
-        # Find the crate path that matches the crate name
-        for member_path_str in expanded_members:
-            member_path = repo_path / member_path_str
-            member_cargo = member_path / "Cargo.toml"
+    available_crates = _get_available_crates_from_members(repo_path, expanded_members)
+    raise CargitError(
+        "This is a workspace with multiple crates. Please specify which crate to install.\n"
+        f"Available crates: {', '.join(available_crates)}\n"
+        "Usage: cargit install <git_url> <crate_name>"
+    )
 
-            if member_cargo.exists():
-                try:
-                    if use_tomllib:
-                        with open(member_cargo, "rb") as f:
-                            member_data = tomllib.load(f)
-                    else:
-                        with open(member_cargo, "r", encoding="utf-8") as f:
-                            member_data = tomlkit.load(f)
 
-                    if (
-                        "package" in member_data
-                        and member_data["package"].get("name") == crate_name
-                    ):
-                        crate_path = member_path
-                        break
-                except Exception:
-                    continue
+def _load_workspace_crate(
+    repo_path: Path, expanded_members: list[str], crate_name: str, use_tomllib: bool
+) -> dict:
+    crate_path = _find_crate_path(repo_path, expanded_members, crate_name, use_tomllib)
+    return _load_member_toml(crate_path / "Cargo.toml", use_tomllib)
 
-        if crate_path is None:
-            available_crates = _get_available_crates_from_members(
-                repo_path, expanded_members
-            )
-            raise CargitError(
-                f"Crate '{crate_name}' not found in workspace.\n"
-                f"Available crates: {', '.join(available_crates)}"
-            )
 
-        # Get binary name from the specific crate's Cargo.toml
-        crate_cargo = crate_path / "Cargo.toml"
+def _find_crate_path(
+    repo_path: Path, expanded_members: list[str], crate_name: str, use_tomllib: bool
+) -> Path:
+    for member_path_str in expanded_members:
+        member_path = repo_path / member_path_str
+        member_cargo = member_path / "Cargo.toml"
+        if not member_cargo.exists():
+            continue
+
         try:
-            if use_tomllib:
-                with open(crate_cargo, "rb") as f:
-                    crate_data = tomllib.load(f)
-            else:
-                with open(crate_cargo, "r", encoding="utf-8") as f:
-                    crate_data = tomlkit.load(f)
+            member_data = _load_member_toml(member_cargo, use_tomllib)
+            if member_data.get("package", {}).get("name") == crate_name:
+                return member_path
+        except Exception:
+            continue
 
-            # Check for [[bin]] section first
-            if "bin" in crate_data and crate_data["bin"]:
-                return crate_data["bin"][0]["name"]
+    available_crates = _get_available_crates_from_members(repo_path, expanded_members)
+    raise CargitError(
+        f"Crate '{crate_name}' not found in workspace.\n"
+        f"Available crates: {', '.join(available_crates)}"
+    )
 
-            # Fallback to package name
-            if "package" in crate_data and "name" in crate_data["package"]:
-                return crate_data["package"]["name"]
 
-        except Exception as e:
-            raise CargitError(f"Could not read crate Cargo.toml: {e}")
+def _load_member_toml(member_cargo: Path, use_tomllib: bool) -> dict:
+    if use_tomllib:
+        import tomllib
 
-    else:
-        # Regular single-crate repository
-        if crate_name is not None:
-            rprint(
-                f"[yellow]Warning: Crate name '{crate_name}' specified but this is not a workspace. Ignoring.[/yellow]"
-            )
+        with open(member_cargo, "rb") as f:
+            return tomllib.load(f)
 
-        # Check for [[bin]] section first
-        if "bin" in cargo_data and cargo_data["bin"]:
-            return cargo_data["bin"][0]["name"]
+    import tomlkit
 
-        # Fallback to package name
-        if "package" in cargo_data and "name" in cargo_data["package"]:
-            return cargo_data["package"]["name"]
+    with open(member_cargo, "r", encoding="utf-8") as f:
+        return tomlkit.load(f)
 
-    raise CargitError("Could not determine binary name from Cargo.toml")
+
+def _extract_binary_name(cargo_data: dict) -> str | None:
+    if "bin" in cargo_data and cargo_data["bin"]:
+        return cargo_data["bin"][0].get("name")
+
+    if "package" in cargo_data and "name" in cargo_data["package"]:
+        return cargo_data["package"]["name"]
+
+    return None
 
 
 def _expand_workspace_members(repo_path: Path, members: list[str]) -> list[str]:
@@ -637,22 +647,45 @@ def update_repository(
     commit: str | None = None,
     tag: str | None = None,
 ) -> tuple[str, bool]:
-    """Update repository to specific branch, commit, or tag
+    """Update repository to specific branch, commit, or tag"""
 
-    Behavior:
-    - Only branch: Update to latest HEAD of that branch
-    - Only commit: Switch to that commit on current branch (detached state)
-    - Branch + commit: Switch to that commit, track as on that branch
-    - Only tag: Switch to that tag (detached state)
-
-    Returns:
-        tuple[str, bool]: (actual_branch, was_updated)
-    """
-    # Get current commit before update
     current_commit_hash = get_current_commit(repo_path)
+    _fetch_for_update(repo_path)
 
-    # Always fetch first to ensure remote refs are up-to-date
-    # This is cheap and prevents incorrect "up-to-date" messages
+    target_type = _determine_target_type(tag, commit)
+    if target_type == "tag":
+        actual_branch, changed = _update_to_tag(repo_path, tag, current_commit_hash)
+    elif target_type == "commit":
+        actual_branch, changed = _update_to_commit(
+            repo_path, branch, commit, current_commit_hash
+        )
+    else:
+        actual_branch, changed = _update_to_branch(
+            repo_path, branch, current_commit_hash
+        )
+
+    _clean_worktree(repo_path)
+
+    new_commit_hash = get_current_commit(repo_path)
+    was_updated = changed or current_commit_hash != new_commit_hash
+
+    if was_updated:
+        rprint(
+            f"[green]Updated from {current_commit_hash[:8]} to {new_commit_hash[:8]}[/green]"
+        )
+
+    return actual_branch, was_updated
+
+
+def _determine_target_type(tag: str | None, commit: str | None) -> str:
+    if tag:
+        return "tag"
+    if commit:
+        return "commit"
+    return "branch"
+
+
+def _fetch_for_update(repo_path: Path):
     try:
         if _is_shallow_repo(repo_path):
             run_command(["git", "fetch", "--depth=1", "origin"], cwd=repo_path)
@@ -661,222 +694,163 @@ def update_repository(
     except CargitError as e:
         rprint(f"[yellow]Warning: Could not fetch remote updates: {e}[/yellow]")
 
-    # Determine what we're updating to
-    if tag:
-        # Tag takes precedence
-        target_type = "tag"
-    elif commit:
-        target_type = "commit"
-    else:
-        # Branch update (default)
-        if branch is None:
-            branch = get_default_branch(repo_path)
-        target_type = "branch"
 
-    # Handle each update type
-    if target_type == "tag":
-        # For tags, check if we already have it
-        try:
-            # Try to verify if the tag exists locally
-            tag_commit = run_command(
-                ["git", "rev-list", "-n", "1", f"tags/{tag}"],
-                cwd=repo_path,
-                capture_output=True,
-            ).stdout.strip()
+def _update_to_tag(
+    repo_path: Path, tag: str | None, current_commit_hash: str
+) -> tuple[str, bool]:
+    if tag is None:
+        raise CargitError("Tag not provided")
 
-            # Tag exists, check if we're already on it
-            if current_commit_hash == tag_commit:
-                rprint(f"[green]Already on tag {tag}[/green]")
-                return f"tag:{tag}", False
-
-            # Tag exists but we're not on it, just checkout
-            rprint(f"[blue]Checking out existing tag {tag}...[/blue]")
-            run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
-
-        except CargitError:
-            # Tag doesn't exist locally, need to fetch
-            rprint(f"[blue]Fetching tag {tag}...[/blue]")
-            if _is_shallow_repo(repo_path):
-                run_command(
-                    [
-                        "git",
-                        "fetch",
-                        "--depth=1",
-                        "origin",
-                        f"refs/tags/{tag}:refs/tags/{tag}",
-                    ],
-                    cwd=repo_path,
-                )
-            else:
-                run_command(
-                    ["git", "fetch", "origin", f"refs/tags/{tag}:refs/tags/{tag}"],
-                    cwd=repo_path,
-                )
-
-            # Checkout the tag
-            run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
-
-        # Return tag name as branch for tracking
-        actual_branch = f"tag:{tag}"
-
-    elif target_type == "commit":
-        # Determine which branch context to use
-        if branch is None:
-            # No branch specified, try to get current branch
-            try:
-                current_branch_result = run_command(
-                    ["git", "symbolic-ref", "--short", "HEAD"],
-                    cwd=repo_path,
-                    capture_output=True,
-                )
-                branch = current_branch_result.stdout.strip()
-            except CargitError:
-                # We're in detached state, try to extract branch from metadata
-                # For now, we'll mark it as detached
-                branch = "detached"
-
-        # Check if commit exists locally
-        try:
-            run_command(
-                ["git", "cat-file", "-e", commit],
-                cwd=repo_path,
-                capture_output=True,
-            )
-            commit_exists_locally = True
-        except CargitError:
-            commit_exists_locally = False
-
-        # Check if we're already on this commit
-        if current_commit_hash == commit:
-            rprint(f"[green]Already on commit {commit[:8]}[/green]")
-            return f"commit:{branch}:{commit[:8]}", False
-
-        if not commit_exists_locally:
-            # Need to fetch the commit
-            if _is_shallow_repo(repo_path):
-                rprint(
-                    "[blue]Fetching specific commit (may need to unshallow)...[/blue]"
-                )
-
-                # Try shallow fetch first with the branch
-                if branch and branch != "detached":
-                    try:
-                        run_command(
-                            ["git", "fetch", "--depth=50", "origin", branch],
-                            cwd=repo_path,
-                        )
-                        # Check if we got the commit
-                        run_command(
-                            ["git", "cat-file", "-e", commit],
-                            cwd=repo_path,
-                            capture_output=True,
-                        )
-                        commit_exists_locally = True
-                    except CargitError:
-                        pass
-
-                if not commit_exists_locally:
-                    # Fetch with increasing depth
-                    rprint(
-                        "[yellow]Commit not in recent history, fetching more...[/yellow]"
-                    )
-                    try:
-                        run_command(
-                            ["git", "fetch", "--deepen=100", "origin"],
-                            cwd=repo_path,
-                        )
-                        run_command(
-                            ["git", "cat-file", "-e", commit],
-                            cwd=repo_path,
-                            capture_output=True,
-                        )
-                        commit_exists_locally = True
-                    except CargitError:
-                        # Last resort: unshallow completely
-                        rprint(
-                            "[yellow]Unshallowing repository to find commit...[/yellow]"
-                        )
-                        run_command(
-                            ["git", "fetch", "--unshallow", "origin"],
-                            cwd=repo_path,
-                        )
-            else:
-                # Full repo, just fetch normally
-                rprint(f"[blue]Fetching to get commit {commit[:8]}...[/blue]")
-                run_command(["git", "fetch", "origin"], cwd=repo_path)
-
-        # Checkout the commit
-        rprint(f"[blue]Checking out commit {commit[:8]}...[/blue]")
-        run_command(["git", "checkout", commit], cwd=repo_path)
-
-        # Return tracking info with branch context
-        actual_branch = f"commit:{branch}:{commit[:8]}"
-
-    else:  # branch update
-        # Try to get the remote commit hash without fetching
-        try:
-            remote_commit_hash = get_remote_commit(repo_path, branch)
-
-            # If we already have the latest commit, no need to fetch
-            if current_commit_hash == remote_commit_hash:
-                rprint(
-                    f"[green]{branch} is already up to date (no fetch needed)[/green]"
-                )
-                return branch, False
-        except CargitError:
-            # Remote reference doesn't exist locally, need to fetch
-            # This case is now less likely due to the fetch at the start, but kept for safety
-            pass
-
-        rprint(f"[blue]Checking for updates on branch: {branch}[/blue]")
-
-        # Fetch based on shallow/full repo
-        if _is_shallow_repo(repo_path):
-            rprint("[blue]Fetching latest changes (shallow)...[/blue]")
-            run_command(
-                ["git", "fetch", "--depth=1", "origin", branch],
-                cwd=repo_path,
-            )
-        else:
-            rprint("[blue]Fetching latest changes...[/blue]")
-            run_command(["git", "fetch", "origin", branch], cwd=repo_path)
-            # Optionally convert to shallow to save space
-            _convert_to_shallow(repo_path, branch)
-
-        # Get remote commit after fetch
-        new_remote_commit_hash = get_remote_commit(repo_path, branch)
-
-        # Check if update is needed
-        if current_commit_hash == new_remote_commit_hash:
-            rprint(f"[green]{branch} is already up to date[/green]")
-            return branch, False
-
-        # Update to latest commit on branch
-        rprint(
-            f"[blue]Updating {branch} from {current_commit_hash[:8]} to {new_remote_commit_hash[:8]}...[/blue]"
-        )
-        run_command(
-            ["git", "reset", "--hard", f"origin/{branch}"],
+    try:
+        tag_commit = run_command(
+            ["git", "rev-list", "-n", "1", f"tags/{tag}"],
             cwd=repo_path,
+            capture_output=True,
+        ).stdout.strip()
+
+        if current_commit_hash == tag_commit:
+            rprint(f"[green]Already on tag {tag}[/green]")
+            return f"tag:{tag}", False
+
+        rprint(f"[blue]Checking out existing tag {tag}...[/blue]")
+        run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
+        return f"tag:{tag}", True
+
+    except CargitError:
+        rprint(f"[blue]Fetching tag {tag}...[/blue]")
+        fetch_args = ["git", "fetch", "origin", f"refs/tags/{tag}:refs/tags/{tag}"]
+        if _is_shallow_repo(repo_path):
+            fetch_args = ["git", "fetch", "--depth=1", "origin", f"refs/tags/{tag}:refs/tags/{tag}"]
+        run_command(fetch_args, cwd=repo_path)
+        run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
+        return f"tag:{tag}", True
+
+
+def _update_to_commit(
+    repo_path: Path,
+    branch: str | None,
+    commit: str | None,
+    current_commit_hash: str,
+) -> tuple[str, bool]:
+    if commit is None:
+        raise CargitError("Commit not provided")
+
+    branch_context = _resolve_branch_context(repo_path, branch)
+
+    if current_commit_hash == commit:
+        rprint(f"[green]Already on commit {commit[:8]}[/green]")
+        return f"commit:{branch_context}:{commit[:8]}", False
+
+    if not _commit_available(repo_path, commit):
+        _fetch_commit(repo_path, branch_context, commit)
+
+    rprint(f"[blue]Checking out commit {commit[:8]}...[/blue]")
+    run_command(["git", "checkout", commit], cwd=repo_path)
+    return f"commit:{branch_context}:{commit[:8]}", True
+
+
+def _resolve_branch_context(repo_path: Path, branch: str | None) -> str:
+    if branch:
+        return branch
+    try:
+        current_branch_result = run_command(
+            ["git", "symbolic-ref", "--short", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
         )
+        return current_branch_result.stdout.strip()
+    except CargitError:
+        return "detached"
 
-        actual_branch = branch
 
-    # Clean untracked files but preserve target/ and other build artifacts
-    # Use -f (force) and -d (directories) but NOT -x (don't remove ignored files)
-    # This preserves target/, .cargo/, and other ignored build caches
+def _commit_available(repo_path: Path, commit: str) -> bool:
+    try:
+        run_command(
+            ["git", "cat-file", "-e", commit],
+            cwd=repo_path,
+            capture_output=True,
+        )
+        return True
+    except CargitError:
+        return False
+
+
+def _fetch_commit(repo_path: Path, branch: str | None, commit: str):
+    if _is_shallow_repo(repo_path):
+        rprint("[blue]Fetching specific commit (may need to unshallow)...[/blue]")
+        if branch and branch != "detached":
+            if _try_fetch_depth(repo_path, branch, commit):
+                return
+        if _try_fetch_deepen(repo_path, commit):
+            return
+        rprint("[yellow]Unshallowing repository to find commit...[/yellow]")
+        run_command(["git", "fetch", "--unshallow", "origin"], cwd=repo_path)
+    else:
+        rprint(f"[blue]Fetching to get commit {commit[:8]}...[/blue]")
+        run_command(["git", "fetch", "origin"], cwd=repo_path)
+
+
+def _try_fetch_depth(repo_path: Path, branch: str, commit: str) -> bool:
+    try:
+        run_command(["git", "fetch", "--depth=50", "origin", branch], cwd=repo_path)
+        run_command(["git", "cat-file", "-e", commit], cwd=repo_path, capture_output=True)
+        return True
+    except CargitError:
+        return False
+
+
+def _try_fetch_deepen(repo_path: Path, commit: str) -> bool:
+    try:
+        run_command(["git", "fetch", "--deepen=100", "origin"], cwd=repo_path)
+        run_command(["git", "cat-file", "-e", commit], cwd=repo_path, capture_output=True)
+        return True
+    except CargitError:
+        return False
+
+
+def _update_to_branch(
+    repo_path: Path, branch: str | None, current_commit_hash: str
+) -> tuple[str, bool]:
+    if branch is None:
+        branch = get_default_branch(repo_path)
+
+    remote_commit_hash = None
+    try:
+        remote_commit_hash = get_remote_commit(repo_path, branch)
+        if current_commit_hash == remote_commit_hash:
+            rprint(f"[green]{branch} is already up to date (no fetch needed)[/green]")
+            return branch, False
+    except CargitError:
+        pass
+
+    rprint(f"[blue]Checking for updates on branch: {branch}[/blue]")
+    _fetch_branch(repo_path, branch)
+
+    new_remote_commit_hash = get_remote_commit(repo_path, branch)
+    if current_commit_hash == new_remote_commit_hash:
+        rprint(f"[green]{branch} is already up to date[/green]")
+        return branch, False
+
+    rprint(
+        f"[blue]Updating {branch} from {current_commit_hash[:8]} to {new_remote_commit_hash[:8]}...[/blue]"
+    )
+    run_command(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo_path)
+
+    return branch, True
+
+
+def _fetch_branch(repo_path: Path, branch: str):
+    if _is_shallow_repo(repo_path):
+        rprint("[blue]Fetching latest changes (shallow)...[/blue]")
+        run_command(["git", "fetch", "--depth=1", "origin", branch], cwd=repo_path)
+    else:
+        rprint("[blue]Fetching latest changes...[/blue]")
+        run_command(["git", "fetch", "origin", branch], cwd=repo_path)
+        _convert_to_shallow(repo_path, branch)
+
+
+def _clean_worktree(repo_path: Path):
     run_command(["git", "clean", "-fd"], cwd=repo_path)
-
-    # Check if we actually changed commits
-    new_commit_hash = get_current_commit(repo_path)
-    was_updated = current_commit_hash != new_commit_hash
-
-    if was_updated:
-        rprint(
-            f"[green]Updated from {current_commit_hash[:8]} to {new_commit_hash[:8]}[/green]"
-        )
-
-    return actual_branch, was_updated
 
 
 def check_for_updates(
