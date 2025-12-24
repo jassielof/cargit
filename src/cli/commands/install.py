@@ -18,7 +18,6 @@ from cli.core import (
 )
 from cli.storage import get_binary_metadata, get_binaries_by_repo, save_binary_metadata
 
-
 def install(
     git_url: str = typer.Argument(..., help="Git repository URL"),
     crate: str | None = typer.Argument(
