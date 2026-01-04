@@ -16,26 +16,28 @@ from cli.core import (
     get_current_commit,
     install_binary,
 )
-from cli.storage import get_binary_metadata, get_binaries_by_repo, save_binary_metadata
+from cli.storage import get_binaries_by_repo, get_binary_metadata, save_binary_metadata
+
 
 def install(
     git_url: str = typer.Argument(..., help="Git repository URL"),
-    crate: str | None = typer.Argument(
-        None, help="Crate name (for workspaces with multiple crates)"
+    crate: str | None = typer.Option(
+        None, "--crate", help="Crate name (for workspaces with multiple crates)"
     ),
     branch: str | None = typer.Option(None, "--branch", help="Branch to install from"),
     alias: str | None = typer.Option(
         None, "--alias", help="Alias for installed binary"
     ),
-    dir_path: str | None = typer.Option(None, "--dir", help="Install directory"),
+    dir_path: str | None = typer.Option(
+        None, "--dir", help="Install directory (default: ~/.cargo/bin)"
+    ),
 ):
     """Install a Rust binary from git repository.
 
-    For workspace repositories with multiple crates, specify the crate name
-    as the second argument.
+    For workspace repositories with multiple crates, pass --crate to select which to build.
 
     Examples:
-        cargit install https://github.com/typst/typst typst-cli
+        cargit install https://github.com/typst/typst --crate typst-cli
         cargit install https://github.com/sharkdp/fd
         cargit install https://github.com/BurntSushi/ripgrep --alias rg
     """
@@ -76,7 +78,9 @@ def install(
         binary_path, build_duration = build_binary(repo_path, crate, alias)
 
         # Install binary
-        install_binary(binary_path, alias, install_dir)
+        installed_path = install_binary(
+            binary_path, alias, install_dir, binary_type="copy"
+        )
 
         # Update metadata
         save_binary_metadata(
@@ -87,6 +91,8 @@ def install(
             install_dir=str(install_dir),
             bin_path=str(binary_path),
             crate=crate,
+            binary_type="copy",
+            binary_copy_path=str(installed_path),
         )
 
         rprint(f"[green]Successfully installed {alias}![/green]")

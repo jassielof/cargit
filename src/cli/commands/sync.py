@@ -240,7 +240,9 @@ def _sync_phase_build(updates_needed: list[dict], up_to_date: list[str]):
 
         try:
             binary_path, _ = build_binary(item["repo_path"], info.get("crate"), alias)
-            install_binary(binary_path, alias, Path(info["install_dir"]))
+            installed_path = install_binary(
+                binary_path, alias, Path(info["install_dir"]), binary_type="copy"
+            )
 
             branch = item["branch"] or get_default_branch(item["repo_path"])
             if info.get("artifacts_cleaned", False) or info.get("repo_deleted", False):
@@ -254,6 +256,8 @@ def _sync_phase_build(updates_needed: list[dict], up_to_date: list[str]):
                 install_dir=info["install_dir"],
                 bin_path=str(binary_path),
                 crate=info.get("crate"),
+                binary_type="copy",
+                binary_copy_path=str(installed_path),
             )
 
             rprint(f"  [green]✓ {alias} built successfully[/green]")

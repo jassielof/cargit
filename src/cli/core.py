@@ -4,6 +4,7 @@ This module contains the main operations for git and cargo management,
 including cloning, building, and updating repositories.
 """
 
+import json
 import os
 import subprocess
 import time
@@ -23,7 +24,7 @@ OLD_CARGIT_DIR = Path.home() / ".cargit"
 
 # Directory paths
 REPOS_DIR = CACHE_DIR  # Git repositories and build artifacts
-BIN_DIR = DATA_DIR  # Symlinks to binaries
+BIN_DIR = Path.home() / ".cargo" / "bin"  # Installed binaries (copied)
 BINARIES_SAFE_DIR = CACHE_DIR / "binaries"  # Safe location for copied binaries
 
 
@@ -87,7 +88,7 @@ def _needs_migration() -> bool:
 
 
 def _create_directory_layout():
-    for path in (CACHE_DIR, CONFIG_DIR, DATA_DIR, BINARIES_SAFE_DIR):
+    for path in (CACHE_DIR, CONFIG_DIR, DATA_DIR, BINARIES_SAFE_DIR, BIN_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -196,6 +197,14 @@ def get_repo_path(git_url: str) -> Path:
     return REPOS_DIR / provider / owner / repo
 
 
+def ensure_remote_exists(git_url: str, ref: str | None = None) -> None:
+    """Verify that a remote repository (and optional ref) is reachable."""
+    target_ref = ref or "HEAD"
+    run_command(
+        ["git", "ls-remote", "--exit-code", git_url, target_ref], capture_output=True
+    )
+
+
 def get_default_branch(repo_path: Path) -> str:
     """Get the default branch of a repository"""
     try:
@@ -287,7 +296,10 @@ def _load_cargo_toml(repo_path: Path) -> tuple[dict, bool]:
 
 
 def _resolve_workspace_crate_name(
-    cargo_data: dict, repo_path: Path, expanded_members: list[str], crate_name: str | None
+    cargo_data: dict,
+    repo_path: Path,
+    expanded_members: list[str],
+    crate_name: str | None,
 ) -> str:
     if crate_name:
         return crate_name
@@ -446,6 +458,7 @@ def clone_repository(git_url: str, branch: str | None = None) -> tuple[Path, str
     enabling fast incremental updates. The repository uses shallow cloning
     (only latest commit) to minimize git history size.
     """
+    ensure_remote_exists(git_url, branch)
     repo_path = get_repo_path(git_url)
 
     if repo_path.exists():
@@ -507,11 +520,13 @@ def clone_repository(git_url: str, branch: str | None = None) -> tuple[Path, str
         "clone",
         "--depth=1",  # Only fetch the latest commit
         "--single-branch",  # Only fetch the specified branch
-        "--no-tags",  # Don't fetch tags to save space
+        "--filter=blob:limit=200k",  # Avoid large blobs during install/update
     ]
 
     if branch:
         clone_cmd.extend(["--branch", branch])
+    else:
+        clone_cmd.append("--no-tags")
 
     clone_cmd.extend([git_url, str(repo_path)])
 
@@ -529,7 +544,9 @@ def clone_repository(git_url: str, branch: str | None = None) -> tuple[Path, str
     return repo_path, branch
 
 
-def build_binary(repo_path: Path, crate_name: str | None = None, alias: str | None = None) -> tuple[Path, float]:
+def build_binary(
+    repo_path: Path, crate_name: str | None = None, alias: str | None = None
+) -> tuple[Path, float]:
     """Build the binary with cargo, preserving build cache for fast updates.
 
     Unlike 'cargo install' which removes the repo after building, this keeps
@@ -552,7 +569,7 @@ def build_binary(repo_path: Path, crate_name: str | None = None, alias: str | No
     rprint("[blue]Building with cargo (reusing cached dependencies)...[/blue]")
 
     # Build command
-    build_cmd = ["cargo", "build", "--release"]
+    build_cmd = ["cargo", "build", "--release", "--bins"]
 
     # If specific crate is specified, add it to the build command
     if crate_name:
@@ -563,33 +580,20 @@ def build_binary(repo_path: Path, crate_name: str | None = None, alias: str | No
     run_command(build_cmd, cwd=repo_path)
     build_duration = time.time() - start_time
 
-    target_dir = repo_path / "target" / "release"
+    target_root = _get_cargo_target_dir(repo_path)
+    target_dir = target_root / "release"
     if not target_dir.exists():
         raise CargitError("Build directory not found")
 
     # Find the binary (usually the same name as the package)
     binary_name = get_binary_name_from_cargo(repo_path, crate_name)
-    binary_path = target_dir / binary_name
-
-    if not binary_path.exists():
-        # Try to find any executable in the release directory
-        executables = [
-            f
-            for f in target_dir.iterdir()
-            if f.is_file() and os.access(f, os.X_OK) and not f.suffix
-        ]
-        if executables:
-            binary_path = executables[0]
-            rprint(
-                f"[yellow]Expected binary '{binary_name}' not found, using '{binary_path.name}' instead[/yellow]"
-            )
-        else:
-            raise CargitError(f"Built binary not found in {target_dir}")
+    binary_path = _find_binary_in_target(target_dir, binary_name)
 
     # Store build time if alias is provided
     if alias:
         try:
             from .storage import update_build_time
+
             update_build_time(alias, build_duration)
         except Exception:
             pass  # Don't fail if build time tracking fails
@@ -605,31 +609,95 @@ def build_binary(repo_path: Path, crate_name: str | None = None, alias: str | No
     return binary_path, build_duration
 
 
-def install_binary(binary_path: Path, alias: str, install_dir: Path, binary_type: str = "symlink"):
-    """Install binary by creating symlink or copy
+def _find_binary_in_target(target_dir: Path, binary_name: str) -> Path:
+    """Find binary in target/release, handling platform-specific naming."""
+    if not target_dir.exists():
+        raise CargitError(f"Target directory not found: {target_dir}")
+
+    # Try exact name first
+    binary_path = target_dir / binary_name
+    if binary_path.exists():
+        return binary_path
+
+    # Try with .exe on Windows
+    if os.name == "nt":
+        binary_path = target_dir / f"{binary_name}.exe"
+        if binary_path.exists():
+            return binary_path
+
+    # Last resort: find any executable matching the binary name (case-insensitive on Windows)
+    try:
+        for entry in target_dir.iterdir():
+            if not entry.is_file():
+                continue
+            # Match by name (ignoring .exe suffix)
+            entry_stem = entry.stem
+            if entry_stem == binary_name or (
+                os.name == "nt" and entry_stem.lower() == binary_name.lower()
+            ):
+                return entry
+    except (PermissionError, OSError):
+        pass
+
+    raise CargitError(
+        f"Built binary '{binary_name}' not found in {target_dir}. "
+        f"Check that the crate defines a [[bin]] section in Cargo.toml."
+    )
+
+
+def _get_cargo_target_dir(repo_path: Path) -> Path:
+    """Determine cargo target directory respecting cargo config/env."""
+    try:
+        result = run_command(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+            cwd=repo_path,
+            capture_output=True,
+        )
+        data = json.loads(result.stdout)
+        target_dir = data.get("target_directory")
+        if target_dir:
+            return Path(target_dir)
+    except (CargitError, json.JSONDecodeError, KeyError, TypeError):
+        pass
+
+    # Fallback to standard location
+    return repo_path / "target"
+
+
+def install_binary(
+    binary_path: Path, alias: str, install_dir: Path, binary_type: str = "copy"
+) -> Path:
+    """Install binary by copying to install_dir (preferred) or symlinking if requested.
 
     Args:
         binary_path: Path to the built binary
         alias: Alias name for the binary
         install_dir: Directory to install to
-        binary_type: "symlink" or "copy"
+        binary_type: "copy" (default) or "symlink" for legacy behaviour
+    Returns:
+        Path to the installed binary
     """
     import shutil
 
     install_dir.mkdir(parents=True, exist_ok=True)
-    target_path = install_dir / alias
+
+    # Preserve file extension from source binary (important for Windows .exe)
+    if binary_path.suffix and not alias.endswith(binary_path.suffix):
+        target_name = f"{alias}{binary_path.suffix}"
+    else:
+        target_name = alias
+
+    target_path = install_dir / target_name
 
     # Remove existing file if it exists
     if target_path.exists() or target_path.is_symlink():
         target_path.unlink()
 
-    if binary_type == "copy":
-        # Copy binary to install location
+    if binary_type != "symlink":
         shutil.copy2(binary_path, target_path)
         target_path.chmod(0o755)  # Make executable
-        rprint(f"[green]Installed {alias} (copied) -> {binary_path}[/green]")
+        rprint(f"[green]Installed {alias} (copied) -> {target_path}[/green]")
     else:
-        # Create symlink (default)
         target_path.symlink_to(binary_path)
         rprint(f"[green]Installed {alias} (symlink) -> {binary_path}[/green]")
 
@@ -639,6 +707,8 @@ def install_binary(binary_path: Path, alias: str, install_dir: Path, binary_type
         rprint(
             f'[yellow]Add this to your shell profile: export PATH="{install_dir}:$PATH"[/yellow]'
         )
+
+    return target_path
 
 
 def update_repository(
@@ -720,7 +790,13 @@ def _update_to_tag(
         rprint(f"[blue]Fetching tag {tag}...[/blue]")
         fetch_args = ["git", "fetch", "origin", f"refs/tags/{tag}:refs/tags/{tag}"]
         if _is_shallow_repo(repo_path):
-            fetch_args = ["git", "fetch", "--depth=1", "origin", f"refs/tags/{tag}:refs/tags/{tag}"]
+            fetch_args = [
+                "git",
+                "fetch",
+                "--depth=1",
+                "origin",
+                f"refs/tags/{tag}:refs/tags/{tag}",
+            ]
         run_command(fetch_args, cwd=repo_path)
         run_command(["git", "checkout", f"tags/{tag}"], cwd=repo_path)
         return f"tag:{tag}", True
@@ -793,7 +869,9 @@ def _fetch_commit(repo_path: Path, branch: str | None, commit: str):
 def _try_fetch_depth(repo_path: Path, branch: str, commit: str) -> bool:
     try:
         run_command(["git", "fetch", "--depth=50", "origin", branch], cwd=repo_path)
-        run_command(["git", "cat-file", "-e", commit], cwd=repo_path, capture_output=True)
+        run_command(
+            ["git", "cat-file", "-e", commit], cwd=repo_path, capture_output=True
+        )
         return True
     except CargitError:
         return False
@@ -802,7 +880,9 @@ def _try_fetch_depth(repo_path: Path, branch: str, commit: str) -> bool:
 def _try_fetch_deepen(repo_path: Path, commit: str) -> bool:
     try:
         run_command(["git", "fetch", "--deepen=100", "origin"], cwd=repo_path)
-        run_command(["git", "cat-file", "-e", commit], cwd=repo_path, capture_output=True)
+        run_command(
+            ["git", "cat-file", "-e", commit], cwd=repo_path, capture_output=True
+        )
         return True
     except CargitError:
         return False
@@ -928,8 +1008,8 @@ def check_for_updates(
     return has_update, remote_commit
 
 
-
 # Cache management utilities
+
 
 def copy_binary_to_safe_location(binary_path: Path, alias: str) -> Path:
     """Copy binary to safe location in cache
@@ -1041,6 +1121,7 @@ def find_orphaned_repos() -> list[tuple[Path, int]]:
     Returns list of (repo_path, size_bytes) tuples
     """
     import os
+
     from .storage import get_all_repo_urls
 
     tracked_repos = {get_repo_path(url) for url in get_all_repo_urls()}
@@ -1072,7 +1153,10 @@ def find_orphaned_repos() -> list[tuple[Path, int]]:
                                         repo_path = Path(repo_entry.path)
                                         git_dir = repo_path / ".git"
 
-                                        if git_dir.exists() and repo_path not in tracked_repos:
+                                        if (
+                                            git_dir.exists()
+                                            and repo_path not in tracked_repos
+                                        ):
                                             size = get_cache_size(repo_path)
                                             orphaned.append((repo_path, size))
                             except (PermissionError, OSError):
@@ -1086,6 +1170,7 @@ def find_orphaned_repos() -> list[tuple[Path, int]]:
 
 
 # Parallel operations for sync/update
+
 
 def fetch_repo_silent(
     repo_path: Path,
@@ -1132,7 +1217,9 @@ def fetch_repo_silent(
         return False, str(e)
 
 
-def check_update_available(repo_path: Path, branch: str | None = None) -> tuple[bool, str, str]:
+def check_update_available(
+    repo_path: Path, branch: str | None = None
+) -> tuple[bool, str, str]:
     """Check if updates are available after fetching.
 
     Returns (has_update, current_commit, remote_commit)

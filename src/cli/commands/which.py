@@ -1,5 +1,6 @@
 """Which command for cargit."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -22,10 +23,17 @@ def which(alias: str = typer.Argument(..., help="Alias of binary to locate")):
         rprint(f"[red]Error: Binary '{alias}' not found[/red]")
         sys.exit(1)
 
-    symlink_path = Path(info["install_dir"]) / alias
+    binary_path = Path(info["install_dir"]) / alias
 
-    if symlink_path.exists():
-        rprint(str(symlink_path.resolve()))
+    # Try with platform extension if not found (e.g., .exe on Windows)
+    if not binary_path.exists():
+        if info.get("binary_copy_path"):
+            binary_path = Path(info["binary_copy_path"])
+        elif os.name == "nt" and not alias.endswith(".exe"):
+            binary_path = Path(info["install_dir"]) / f"{alias}.exe"
+
+    if binary_path.exists():
+        rprint(str(binary_path.resolve()))
     else:
-        rprint(f"[red]Error: Binary path does not exist: {symlink_path}[/red]")
+        rprint(f"[red]Error: Binary path does not exist: {binary_path}[/red]")
         sys.exit(1)

@@ -1,5 +1,6 @@
 """Remove command for cargit."""
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -26,17 +27,32 @@ def remove(alias: str = typer.Argument(..., help="Alias of binary to remove")):
             rprint(f"[red]Error: Binary '{alias}' not found[/red]")
             sys.exit(1)
 
-        # Remove symlink
-        symlink_path = Path(info["install_dir"]) / alias
-        if symlink_path.exists():
-            symlink_path.unlink()
-            rprint(f"[blue]Removed binary: {symlink_path}[/blue]")
+        # Remove installed binary copy
+        installed_path = Path(info["install_dir"]) / alias
+
+        # Try with platform extension if not found (e.g., .exe on Windows)
+        if not installed_path.exists():
+            if info.get("binary_copy_path"):
+                installed_path = Path(info["binary_copy_path"])
+            elif os.name == "nt" and not alias.endswith(".exe"):
+                installed_path = Path(info["install_dir"]) / f"{alias}.exe"
+
+        if installed_path.exists() or installed_path.is_symlink():
+            installed_path.unlink()
+            rprint(f"[blue]Removed binary: {installed_path}[/blue]")
 
         # Remove cached repo
         repo_path = get_repo_path(info["repo_url"])
         if repo_path.exists():
-            shutil.rmtree(repo_path)
-            rprint(f"[blue]Removed cached repo: {repo_path}[/blue]")
+            try:
+                shutil.rmtree(repo_path)
+                rprint(f"[blue]Removed cached repo: {repo_path}[/blue]")
+            except (PermissionError, OSError) as e:
+                rprint(
+                    f"[yellow]Warning: Could not fully remove cached repo (some files may be locked): {e}[/yellow]"
+                )
+                # Try to remove with ignore_errors as fallback
+                shutil.rmtree(repo_path, ignore_errors=True)
 
         # Remove from metadata
         remove_binary_metadata(alias)

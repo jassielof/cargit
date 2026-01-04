@@ -204,7 +204,9 @@ def _handle_recovery_paths(
         rprint(f"[yellow]{binary_alias}: Rebuilding cleaned artifacts...[/yellow]")
         try:
             binary_path, _ = build_binary(repo_path, info.get("crate"), binary_alias)
-            install_binary(binary_path, binary_alias, Path(info["install_dir"]))
+            installed_path = install_binary(
+                binary_path, binary_alias, Path(info["install_dir"]), binary_type="copy"
+            )
             reset_cache_flags(binary_alias)
             save_binary_metadata(
                 alias=binary_alias,
@@ -214,6 +216,8 @@ def _handle_recovery_paths(
                 install_dir=info["install_dir"],
                 bin_path=str(binary_path),
                 crate=info.get("crate"),
+                binary_type="copy",
+                binary_copy_path=str(installed_path),
             )
             rprint(f"[green]{binary_alias}: Rebuilt successfully[/green]")
         except Exception as e:
@@ -233,7 +237,9 @@ def _handle_recovery_paths(
     reinstall_branch = stored_branch if not stored_branch.startswith(("commit:", "tag:")) else None
     repo_path, new_branch = clone_repository(info["repo_url"], reinstall_branch)
     binary_path, _ = build_binary(repo_path, info.get("crate"), binary_alias)
-    install_binary(binary_path, binary_alias, Path(info["install_dir"]))
+    installed_path = install_binary(
+        binary_path, binary_alias, Path(info["install_dir"]), binary_type="copy"
+    )
     save_binary_metadata(
         alias=binary_alias,
         repo_url=info["repo_url"],
@@ -242,6 +248,8 @@ def _handle_recovery_paths(
         install_dir=info["install_dir"],
         bin_path=str(binary_path),
         crate=info.get("crate"),
+        binary_type="copy",
+        binary_copy_path=str(installed_path),
     )
     return True
 
@@ -334,7 +342,9 @@ def _perform_update_apply(
 
     rprint(f"[blue]Rebuilding {binary_alias}...[/blue]")
     binary_path, _ = build_binary(repo_path, info.get("crate"), binary_alias)
-    install_binary(binary_path, binary_alias, Path(info["install_dir"]))
+    installed_path = install_binary(
+        binary_path, binary_alias, Path(info["install_dir"]), binary_type="copy"
+    )
 
     save_binary_metadata(
         alias=binary_alias,
@@ -344,6 +354,8 @@ def _perform_update_apply(
         install_dir=info["install_dir"],
         bin_path=str(binary_path),
         crate=info.get("crate"),
+        binary_type="copy",
+        binary_copy_path=str(installed_path),
     )
 
     rprint(f"[green]Updated {binary_alias}![/green]")

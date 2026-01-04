@@ -7,7 +7,7 @@ from rich.console import Console
 
 from cli.core import (
     CACHE_DIR,
-    DATA_DIR,
+    BIN_DIR,
     ensure_dirs,
     get_cache_size,
     format_size,
@@ -46,7 +46,7 @@ def _collect_status_data():
     binaries = get_all_binaries_full()
 
     total_cache_size = get_cache_size(CACHE_DIR) if CACHE_DIR.exists() else 0
-    bin_dir_size = get_cache_size(DATA_DIR) if DATA_DIR.exists() else 0
+    bin_dir_size = get_cache_size(BIN_DIR) if BIN_DIR.exists() else 0
 
     repo_sizes: dict[str, int] = {}
     for binary in binaries:
@@ -67,7 +67,7 @@ def _render_summary_panel(console, summary, total_cache_size, bin_dir_size):
         f"[cyan]Installed binaries:[/cyan] {summary['total_binaries']}\n"
         f"[cyan]Unique repositories:[/cyan] {summary['unique_repos']}\n"
         f"[cyan]Total cache size:[/cyan] {format_size(total_cache_size)}\n"
-        f"[cyan]Binary links size:[/cyan] {format_size(bin_dir_size)}"
+        f"[cyan]Binary installs size:[/cyan] {format_size(bin_dir_size)}"
     )
 
     if summary["total_builds"] > 0:
@@ -164,4 +164,4 @@ def _format_binary_status(binary: dict) -> str:
 
 def _render_status_paths():
     rprint(f"\n[dim]Cache: {CACHE_DIR}[/dim]")
-    rprint(f"[dim]Binaries: {DATA_DIR}[/dim]")
+    rprint(f"[dim]Binaries: {BIN_DIR}[/dim]")

@@ -170,16 +170,28 @@ def save_binary_metadata(
     install_dir: str,
     bin_path: str,
     crate: str | None = None,
+    binary_type: str = "copy",
+    binary_copy_path: str | None = None,
 ) -> None:
     """Save or update a single binary's metadata."""
     with _transaction() as conn:
         conn.execute(
             """
             INSERT OR REPLACE INTO installed_binaries
-            (alias, repo_url, branch, commit_hash, install_dir, bin_path, crate, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            (alias, repo_url, branch, commit_hash, install_dir, bin_path, crate, binary_type, binary_copy_path, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """,
-            (alias, repo_url, branch, commit, install_dir, bin_path, crate),
+            (
+                alias,
+                repo_url,
+                branch,
+                commit,
+                install_dir,
+                bin_path,
+                crate,
+                binary_type,
+                binary_copy_path,
+            ),
         )
 
 
