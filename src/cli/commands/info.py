@@ -11,15 +11,18 @@ from rich import print as rprint
 
 from cli.core import (
     CargitError,
+    _expand_workspace_members,
     ensure_dirs,
     get_current_commit,
     get_default_branch,
     run_command,
-    _expand_workspace_members,
 )
 from cli.storage import get_binaries_by_repo
 
+app = typer.Typer()
 
+
+@app.command()
 def info(
     git_url: str = typer.Argument(..., help="Git repository URL to inspect"),
     branches: bool = typer.Option(
@@ -74,7 +77,9 @@ def info(
 
 def _assert_remote_exists(git_url: str) -> None:
     try:
-        run_command(["git", "ls-remote", "--exit-code", git_url, "HEAD"], capture_output=True)
+        run_command(
+            ["git", "ls-remote", "--exit-code", git_url, "HEAD"], capture_output=True
+        )
     except CargitError as e:
         raise CargitError(f"Could not reach repository: {e}")
 
@@ -122,7 +127,9 @@ def _render_workspace_info(repo_path: Path, cargo_data: dict, git_url: str):
 
     workspace = cargo_data["workspace"]
     workspace_pkg = workspace.get("package", {})
-    workspace_version = workspace_pkg.get("version") if isinstance(workspace_pkg, dict) else None
+    workspace_version = (
+        workspace_pkg.get("version") if isinstance(workspace_pkg, dict) else None
+    )
 
     default_members = workspace.get("default-members", [])
     default_members_norm = [m.replace("\\", "/") for m in default_members]
@@ -132,7 +139,9 @@ def _render_workspace_info(repo_path: Path, cargo_data: dict, git_url: str):
     default_display = ", ".join(default_members) if default_members else "(none)"
     rprint(f"[bold]Default members:[/bold] {default_display}")
     if default_members:
-        rprint("[dim]All default members are installed when no crate is specified.[/dim]")
+        rprint(
+            "[dim]All default members are installed when no crate is specified.[/dim]"
+        )
 
     rendered = 0
     rprint("\n[bold]Crates:[/bold]")
@@ -159,15 +168,21 @@ def _render_workspace_info(repo_path: Path, cargo_data: dict, git_url: str):
         rprint("    Binaries:")
         for bin_entry in crate_info["binaries"]:
             features = bin_entry.get("required_features", [])
-            feature_str = f" [dim](features: {', '.join(features)})[/dim]" if features else ""
+            feature_str = (
+                f" [dim](features: {', '.join(features)})[/dim]" if features else ""
+            )
             rprint(f"      - {bin_entry['name']}{feature_str}")
 
         feature_union = _collect_feature_union(crate_info["binaries"])
-        install_cmd = _build_install_command(git_url, crate_info["package"], feature_union, annotate_features=True)
+        install_cmd = _build_install_command(
+            git_url, crate_info["package"], feature_union, annotate_features=True
+        )
         rprint(f"    Install: {install_cmd}\n")
 
     if rendered == 0:
-        rprint("  [yellow]No crates with binaries were found in workspace members.[/yellow]")
+        rprint(
+            "  [yellow]No crates with binaries were found in workspace members.[/yellow]"
+        )
 
 
 def _render_existing_installations(git_url: str):
@@ -191,20 +206,28 @@ def _render_single_crate_info(repo_path: Path, cargo_data: dict, git_url: str):
         rprint(f"[bold]Description:[/bold] {crate_info['description']}")
 
     if not crate_info["binaries"]:
-        raise CargitError("This crate does not define any binaries (bin section missing).")
+        raise CargitError(
+            "This crate does not define any binaries (bin section missing)."
+        )
 
     rprint("\n[bold]Binaries:[/bold]")
     for bin_entry in crate_info["binaries"]:
         features = bin_entry.get("required_features", [])
-        feature_str = f" [dim](features: {', '.join(features)})[/dim]" if features else ""
+        feature_str = (
+            f" [dim](features: {', '.join(features)})[/dim]" if features else ""
+        )
         rprint(f"  • {bin_entry['name']}{feature_str}")
 
     feature_union = _collect_feature_union(crate_info["binaries"])
-    install_cmd = _build_install_command(git_url, None, feature_union, annotate_features=True)
+    install_cmd = _build_install_command(
+        git_url, None, feature_union, annotate_features=True
+    )
     rprint(f"\n[dim]Install with: {install_cmd}[/dim]")
 
 
-def _extract_crate_info(cargo_data: dict, crate_path: Path, workspace_version: str | None = None) -> dict[str, Any]:
+def _extract_crate_info(
+    cargo_data: dict, crate_path: Path, workspace_version: str | None = None
+) -> dict[str, Any]:
     if "package" not in cargo_data:
         raise CargitError(f"Cargo.toml at {crate_path} is missing [package] section")
 
@@ -244,7 +267,10 @@ def _collect_feature_union(binaries: list[dict[str, Any]]) -> list[str]:
 
 
 def _build_install_command(
-    git_url: str, crate: str | None, features: list[str], annotate_features: bool = False
+    git_url: str,
+    crate: str | None,
+    features: list[str],
+    annotate_features: bool = False,
 ) -> str:
     parts = ["cargit", "install", git_url]
     if crate:

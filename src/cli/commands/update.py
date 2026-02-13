@@ -6,29 +6,37 @@ from pathlib import Path
 
 import typer
 from rich import print as rprint
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 
 from cli.core import (
     CargitError,
     build_binary,
+    check_update_available,
     clone_repository,
     ensure_dirs,
+    fetch_repo_silent,
     get_current_commit,
     get_repo_path,
     install_binary,
     update_repository,
-    fetch_repo_silent,
-    check_update_available,
-    reset_to_remote,
 )
 from cli.storage import (
-    load_metadata,
-    save_binary_metadata,
     get_binary_metadata,
+    load_metadata,
     reset_cache_flags,
+    save_binary_metadata,
 )
 
+app = typer.Typer()
 
+
+@app.command()
 def update(
     alias: str | None = typer.Argument(
         None, help="Alias of binary to update (omit for --all)"
@@ -97,7 +105,12 @@ def update(
 
 
 def _validate_update_args(
-    alias: str | None, all: bool, branch: str | None, commit: str | None, tag: str | None, check: bool
+    alias: str | None,
+    all: bool,
+    branch: str | None,
+    commit: str | None,
+    tag: str | None,
+    check: bool,
 ):
     if all and alias:
         rprint("[red]Error: Cannot specify both <alias> and --all[/red]")
@@ -108,7 +121,9 @@ def _validate_update_args(
         sys.exit(1)
 
     if all and (branch or commit or tag) and not check:
-        rprint("[red]Error: Cannot specify --branch, --commit, or --tag with --all[/red]")
+        rprint(
+            "[red]Error: Cannot specify --branch, --commit, or --tag with --all[/red]"
+        )
         sys.exit(1)
 
     if sum([bool(commit), bool(tag)]) > 1:
@@ -116,7 +131,9 @@ def _validate_update_args(
         sys.exit(1)
 
 
-def _collect_update_targets(metadata: dict, alias: str | None, all_mode: bool) -> list[str]:
+def _collect_update_targets(
+    metadata: dict, alias: str | None, all_mode: bool
+) -> list[str]:
     if all_mode:
         return list(metadata["installed"].keys())
 
@@ -234,7 +251,9 @@ def _handle_recovery_paths(
         return True
 
     rprint(f"[yellow]Repository missing for {binary_alias}, reinstalling...[/yellow]")
-    reinstall_branch = stored_branch if not stored_branch.startswith(("commit:", "tag:")) else None
+    reinstall_branch = (
+        stored_branch if not stored_branch.startswith(("commit:", "tag:")) else None
+    )
     repo_path, new_branch = clone_repository(info["repo_url"], reinstall_branch)
     binary_path, _ = build_binary(repo_path, info.get("crate"), binary_alias)
     installed_path = install_binary(
@@ -386,7 +405,9 @@ def _collect_check_items(targets: list[str]) -> list[tuple[str, Path, str, str]]
 
         stored_branch = info.get("branch", "")
         if stored_branch.startswith(("commit:", "tag:")):
-            rprint(f"[yellow]Skipping {binary_alias}: pinned to {stored_branch}[/yellow]")
+            rprint(
+                f"[yellow]Skipping {binary_alias}: pinned to {stored_branch}[/yellow]"
+            )
             continue
 
         repo_path = get_repo_path(info["repo_url"])
@@ -403,7 +424,9 @@ def _collect_check_items(targets: list[str]) -> list[tuple[str, Path, str, str]]
     return check_items
 
 
-def _fetch_check_items(check_items: list[tuple[str, Path, str, str]], jobs: int) -> dict[str, bool]:
+def _fetch_check_items(
+    check_items: list[tuple[str, Path, str, str]], jobs: int
+) -> dict[str, bool]:
     fetch_results: dict[str, bool] = {}
 
     with Progress(
@@ -412,7 +435,9 @@ def _fetch_check_items(check_items: list[tuple[str, Path, str, str]], jobs: int)
         BarColumn(),
         TaskProgressColumn(),
     ) as progress:
-        task = progress.add_task("[cyan]Fetching repositories...", total=len(check_items))
+        task = progress.add_task(
+            "[cyan]Fetching repositories...", total=len(check_items)
+        )
 
         def fetch_one(item: tuple[str, Path, str, str]) -> tuple[str, bool, str | None]:
             alias, repo_path, branch, _ = item
@@ -420,13 +445,17 @@ def _fetch_check_items(check_items: list[tuple[str, Path, str, str]], jobs: int)
             return alias, success, error
 
         with ThreadPoolExecutor(max_workers=jobs) as executor:
-            futures = {executor.submit(fetch_one, item): item[0] for item in check_items}
+            futures = {
+                executor.submit(fetch_one, item): item[0] for item in check_items
+            }
 
             for future in as_completed(futures):
                 alias, success, error = future.result()
                 fetch_results[alias] = success
                 if not success:
-                    progress.console.print(f"[yellow]{alias}: fetch failed - {error}[/yellow]")
+                    progress.console.print(
+                        f"[yellow]{alias}: fetch failed - {error}[/yellow]"
+                    )
                 progress.advance(task)
 
     return fetch_results
@@ -462,7 +491,9 @@ def _print_parallel_check_results(
             rprint(f"  [cyan]{alias}[/cyan]: {old} → {new}")
 
     if up_to_date:
-        rprint(f"\n[green]Up to date ({len(up_to_date)}):[/green] {', '.join(up_to_date)}")
+        rprint(
+            f"\n[green]Up to date ({len(up_to_date)}):[/green] {', '.join(up_to_date)}"
+        )
 
     if updates_available:
         rprint("\n[blue]Run 'cargit sync' to fetch, reset, and rebuild all.[/blue]")

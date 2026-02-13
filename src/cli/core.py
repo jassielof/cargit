@@ -636,7 +636,7 @@ def _find_binary_in_target(target_dir: Path, binary_name: str) -> Path:
                 os.name == "nt" and entry_stem.lower() == binary_name.lower()
             ):
                 return entry
-    except (PermissionError, OSError):
+    except PermissionError, OSError:
         pass
 
     raise CargitError(
@@ -657,7 +657,7 @@ def _get_cargo_target_dir(repo_path: Path) -> Path:
         target_dir = data.get("target_directory")
         if target_dir:
             return Path(target_dir)
-    except (CargitError, json.JSONDecodeError, KeyError, TypeError):
+    except CargitError, json.JSONDecodeError, KeyError, TypeError:
         pass
 
     # Fallback to standard location
@@ -1045,9 +1045,9 @@ def get_cache_size(path: Path) -> int:
                             total += entry.stat(follow_symlinks=False).st_size
                         elif entry.is_dir(follow_symlinks=False):
                             total += _scandir_size(entry.path)
-                    except (PermissionError, OSError):
+                    except PermissionError, OSError:
                         continue
-        except (PermissionError, OSError):
+        except PermissionError, OSError:
             pass
         return total
 
@@ -1159,11 +1159,11 @@ def find_orphaned_repos() -> list[tuple[Path, int]]:
                                         ):
                                             size = get_cache_size(repo_path)
                                             orphaned.append((repo_path, size))
-                            except (PermissionError, OSError):
+                            except PermissionError, OSError:
                                 continue
-                except (PermissionError, OSError):
+                except PermissionError, OSError:
                     continue
-    except (PermissionError, OSError):
+    except PermissionError, OSError:
         pass
 
     return orphaned

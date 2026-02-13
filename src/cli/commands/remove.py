@@ -11,7 +11,10 @@ from rich import print as rprint
 from cli.core import CargitError, ensure_dirs, get_repo_path
 from cli.storage import get_binary_metadata, remove_binary_metadata
 
+app = typer.Typer()
 
+
+@app.command()
 def remove(alias: str = typer.Argument(..., help="Alias of binary to remove")):
     """Remove installed binary
 

@@ -4,6 +4,7 @@ from rich import print as rprint
 from rich.table import Table
 from rich.panel import Panel
 from rich.console import Console
+import typer
 
 from cli.core import (
     CACHE_DIR,
@@ -15,7 +16,10 @@ from cli.core import (
 )
 from cli.storage import get_status_summary, get_all_binaries_full
 
+app = typer.Typer()
 
+
+@app.command()
 def status():
     """Show cache status and statistics.
 
@@ -32,7 +36,9 @@ def status():
 
     ensure_dirs()
 
-    summary, binaries, repo_sizes, total_cache_size, bin_dir_size = _collect_status_data()
+    summary, binaries, repo_sizes, total_cache_size, bin_dir_size = (
+        _collect_status_data()
+    )
 
     _render_status_header()
     _render_summary_panel(console, summary, total_cache_size, bin_dir_size)
@@ -73,7 +79,11 @@ def _render_summary_panel(console, summary, total_cache_size, bin_dir_size):
     if summary["total_builds"] > 0:
         avg_time = summary["overall_avg_build_time"]
         if avg_time:
-            avg_str = f"{int(avg_time // 60)}m {int(avg_time % 60)}s" if avg_time >= 60 else f"{avg_time:.1f}s"
+            avg_str = (
+                f"{int(avg_time // 60)}m {int(avg_time % 60)}s"
+                if avg_time >= 60
+                else f"{avg_time:.1f}s"
+            )
             summary_text += f"\n[cyan]Total builds:[/cyan] {summary['total_builds']}"
             summary_text += f"\n[cyan]Avg build time:[/cyan] {avg_str}"
 

@@ -6,12 +6,17 @@ import sys
 import typer
 from rich import print as rprint
 
-from cli.config import load_config, init_config, CONFIG_FILE
+from cli.config import CONFIG_FILE, init_config, load_config
+
+app = typer.Typer()
 
 
+@app.command()
 def config(
     show: bool = typer.Option(False, "--show", help="Show current configuration"),
-    init: bool = typer.Option(False, "--init", help="Initialize config file with defaults"),
+    init: bool = typer.Option(
+        False, "--init", help="Initialize config file with defaults"
+    ),
     edit: bool = typer.Option(False, "--edit", help="Open config file in editor"),
 ):
     """Manage cargit configuration.

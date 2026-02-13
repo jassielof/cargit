@@ -6,7 +6,13 @@ from pathlib import Path
 
 import typer
 from rich import print as rprint
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+)
 
 from cli.core import (
     CargitError,
@@ -27,10 +33,17 @@ from cli.storage import (
     reset_cache_flags,
 )
 
+app = typer.Typer()
 
+
+@app.command()
 def sync(
-    jobs: int = typer.Option(8, "--jobs", "-j", help="Number of parallel git operations"),
-    fetch_only: bool = typer.Option(False, "--fetch-only", help="Only fetch, don't reset or build"),
+    jobs: int = typer.Option(
+        8, "--jobs", "-j", help="Number of parallel git operations"
+    ),
+    fetch_only: bool = typer.Option(
+        False, "--fetch-only", help="Only fetch, don't reset or build"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be done"),
 ):
     """Sync all binaries: parallel fetch & reset, then sequential builds."""
@@ -86,20 +99,26 @@ def _collect_sync_items(metadata: dict) -> list[dict]:
         repo_path = get_repo_path(info["repo_url"])
         if not repo_path.exists():
             if info.get("repo_deleted", False):
-                rprint(f"[yellow]{binary_alias}: needs reclone (repo was cleaned)[/yellow]")
+                rprint(
+                    f"[yellow]{binary_alias}: needs reclone (repo was cleaned)[/yellow]"
+                )
             else:
                 rprint(f"[yellow]{binary_alias}: repo missing[/yellow]")
             continue
 
         if info.get("artifacts_cleaned", False):
-            rprint(f"[yellow]{binary_alias}: needs rebuild (artifacts cleaned)[/yellow]")
+            rprint(
+                f"[yellow]{binary_alias}: needs rebuild (artifacts cleaned)[/yellow]"
+            )
 
-        sync_items.append({
-            "alias": binary_alias,
-            "info": info,
-            "repo_path": repo_path,
-            "branch": stored_branch or None,
-        })
+        sync_items.append(
+            {
+                "alias": binary_alias,
+                "info": info,
+                "repo_path": repo_path,
+                "branch": stored_branch or None,
+            }
+        )
 
     return sync_items
 
@@ -121,7 +140,9 @@ def _sync_phase_fetch(sync_items: list[dict], jobs: int) -> dict[str, bool]:
             return item["alias"], success, error
 
         with ThreadPoolExecutor(max_workers=jobs) as executor:
-            futures = {executor.submit(fetch_one, item): item["alias"] for item in sync_items}
+            futures = {
+                executor.submit(fetch_one, item): item["alias"] for item in sync_items
+            }
             for future in as_completed(futures):
                 alias, success, error = future.result()
                 fetch_results[alias] = success
@@ -141,19 +162,29 @@ def _evaluate_updates(sync_items: list[dict], fetch_results: dict[str, bool]):
         if not fetch_results.get(alias, False):
             continue
 
-        has_update, current, remote = check_update_available(item["repo_path"], item["branch"])
+        has_update, current, remote = check_update_available(
+            item["repo_path"], item["branch"]
+        )
         needs_rebuild = item["info"].get("artifacts_cleaned", False)
 
         if has_update:
             item.update({"current_commit": current, "remote_commit": remote})
             updates_needed.append(item)
         elif needs_rebuild:
-            item.update({"current_commit": current, "remote_commit": current, "rebuild_only": True})
+            item.update(
+                {
+                    "current_commit": current,
+                    "remote_commit": current,
+                    "rebuild_only": True,
+                }
+            )
             updates_needed.append(item)
         else:
             up_to_date.append(alias)
 
-    rprint(f"  [green]✓ Fetched {sum(fetch_results.values())}/{len(sync_items)} repos[/green]")
+    rprint(
+        f"  [green]✓ Fetched {sum(fetch_results.values())}/{len(sync_items)} repos[/green]"
+    )
     if up_to_date:
         rprint(f"  [dim]Already up to date: {', '.join(up_to_date)}[/dim]")
     if updates_needed:
@@ -162,14 +193,18 @@ def _evaluate_updates(sync_items: list[dict], fetch_results: dict[str, bool]):
     return updates_needed, up_to_date
 
 
-def _maybe_exit_after_check(updates_needed: list[dict], dry_run: bool, fetch_only: bool) -> bool:
+def _maybe_exit_after_check(
+    updates_needed: list[dict], dry_run: bool, fetch_only: bool
+) -> bool:
     if dry_run:
         rprint("\n[yellow]Dry run - would update:[/yellow]")
         for item in updates_needed:
             if item.get("rebuild_only"):
                 rprint(f"  [cyan]{item['alias']}[/cyan]: rebuild (artifacts cleaned)")
             else:
-                rprint(f"  [cyan]{item['alias']}[/cyan]: {item['current_commit'][:8]} → {item['remote_commit'][:8]}")
+                rprint(
+                    f"  [cyan]{item['alias']}[/cyan]: {item['current_commit'][:8]} → {item['remote_commit'][:8]}"
+                )
         return True
 
     if fetch_only:
@@ -203,7 +238,9 @@ def _sync_phase_reset(updates_needed: list[dict], jobs: int) -> list[dict]:
             return item["alias"], success, error
 
         with ThreadPoolExecutor(max_workers=jobs) as executor:
-            futures = {executor.submit(reset_one, item): item["alias"] for item in reset_items}
+            futures = {
+                executor.submit(reset_one, item): item["alias"] for item in reset_items
+            }
             for future in as_completed(futures):
                 alias, success, error = future.result()
                 reset_results[alias] = success
@@ -211,10 +248,13 @@ def _sync_phase_reset(updates_needed: list[dict], jobs: int) -> list[dict]:
                     progress.console.print(f"  [yellow]✗ {alias}: {error}[/yellow]")
                 progress.advance(task)
 
-    rprint(f"  [green]✓ Reset {sum(reset_results.values())}/{len(reset_items)} repos[/green]")
+    rprint(
+        f"  [green]✓ Reset {sum(reset_results.values())}/{len(reset_items)} repos[/green]"
+    )
 
     return [
-        item for item in updates_needed
+        item
+        for item in updates_needed
         if item.get("rebuild_only") or reset_results.get(item["alias"], False)
     ]
 
@@ -227,7 +267,9 @@ def _safe_default_branch(item: dict) -> str:
 
 
 def _sync_phase_build(updates_needed: list[dict], up_to_date: list[str]):
-    rprint(f"\n[bold cyan]Phase 3/3: Building {len(updates_needed)} binaries[/bold cyan]")
+    rprint(
+        f"\n[bold cyan]Phase 3/3: Building {len(updates_needed)} binaries[/bold cyan]"
+    )
 
     built = 0
     failed = 0

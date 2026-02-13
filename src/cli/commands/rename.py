@@ -13,7 +13,10 @@ from cli.storage import (
     save_binary_metadata,
 )
 
+app = typer.Typer()
 
+
+@app.command()
 def rename(
     current_alias: str = typer.Argument(..., help="Current alias of the binary"),
     new_alias: str = typer.Option(..., "--to", help="New alias for the binary"),

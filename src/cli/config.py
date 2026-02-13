@@ -18,19 +18,19 @@ CONFIG_FILE = CONFIG_DIR / "config.toml"
 # Default configuration values
 DEFAULTS: dict[str, Any] = {
     "parallel": {
-        "fetch_jobs": 8,      # Number of parallel git fetch operations
-        "reset_jobs": 8,      # Number of parallel git reset operations
+        "fetch_jobs": 8,  # Number of parallel git fetch operations
+        "reset_jobs": 8,  # Number of parallel git reset operations
     },
     "network": {
         "retry_attempts": 3,  # Number of retry attempts for network operations
-        "retry_delay": 1.0,   # Delay between retries in seconds
+        "retry_delay": 1.0,  # Delay between retries in seconds
     },
     "build": {
-        "track_time": True,   # Track and display build times
+        "track_time": True,  # Track and display build times
     },
     "display": {
         "show_progress": True,  # Show progress bars
-        "verbose": False,       # Verbose output (show git/cargo output)
+        "verbose": False,  # Verbose output (show git/cargo output)
     },
 }
 
@@ -172,7 +172,9 @@ def get_fetch_jobs() -> int:
 
 def get_retry_attempts() -> int:
     """Get number of retry attempts for network operations."""
-    return get_config_value("network.retry_attempts", DEFAULTS["network"]["retry_attempts"])
+    return get_config_value(
+        "network.retry_attempts", DEFAULTS["network"]["retry_attempts"]
+    )
 
 
 def get_retry_delay() -> float:

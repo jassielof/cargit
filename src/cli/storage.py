@@ -69,7 +69,7 @@ def _get_connection() -> sqlite3.Connection:
     """Get a thread-local database connection."""
     _init_database()
 
-    conn = getattr(_local, 'connection', None)
+    conn = getattr(_local, "connection", None)
     if conn is None:
         conn = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -125,13 +125,34 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in cursor.fetchall()}
 
     migrations = [
-        ("artifacts_cleaned", "ALTER TABLE installed_binaries ADD COLUMN artifacts_cleaned BOOLEAN DEFAULT 0"),
-        ("repo_deleted", "ALTER TABLE installed_binaries ADD COLUMN repo_deleted BOOLEAN DEFAULT 0"),
-        ("binary_type", "ALTER TABLE installed_binaries ADD COLUMN binary_type TEXT DEFAULT 'symlink'"),
-        ("binary_copy_path", "ALTER TABLE installed_binaries ADD COLUMN binary_copy_path TEXT"),
-        ("last_build_duration", "ALTER TABLE installed_binaries ADD COLUMN last_build_duration REAL"),
-        ("total_build_count", "ALTER TABLE installed_binaries ADD COLUMN total_build_count INTEGER DEFAULT 0"),
-        ("avg_build_duration", "ALTER TABLE installed_binaries ADD COLUMN avg_build_duration REAL"),
+        (
+            "artifacts_cleaned",
+            "ALTER TABLE installed_binaries ADD COLUMN artifacts_cleaned BOOLEAN DEFAULT 0",
+        ),
+        (
+            "repo_deleted",
+            "ALTER TABLE installed_binaries ADD COLUMN repo_deleted BOOLEAN DEFAULT 0",
+        ),
+        (
+            "binary_type",
+            "ALTER TABLE installed_binaries ADD COLUMN binary_type TEXT DEFAULT 'symlink'",
+        ),
+        (
+            "binary_copy_path",
+            "ALTER TABLE installed_binaries ADD COLUMN binary_copy_path TEXT",
+        ),
+        (
+            "last_build_duration",
+            "ALTER TABLE installed_binaries ADD COLUMN last_build_duration REAL",
+        ),
+        (
+            "total_build_count",
+            "ALTER TABLE installed_binaries ADD COLUMN total_build_count INTEGER DEFAULT 0",
+        ),
+        (
+            "avg_build_duration",
+            "ALTER TABLE installed_binaries ADD COLUMN avg_build_duration REAL",
+        ),
     ]
 
     for column_name, migration_sql in migrations:
@@ -144,7 +165,9 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 def load_metadata() -> dict[str, Any]:
     """Load metadata from SQLite database."""
     conn = _get_connection()
-    cursor = conn.execute("SELECT alias, repo_url, branch, commit_hash, install_dir, bin_path, crate FROM installed_binaries")
+    cursor = conn.execute(
+        "SELECT alias, repo_url, branch, commit_hash, install_dir, bin_path, crate FROM installed_binaries"
+    )
 
     installed = {
         row["alias"]: {
@@ -204,9 +227,7 @@ def remove_binary_metadata(alias: str) -> None:
 def get_binary_metadata(alias: str) -> dict[str, Any] | None:
     """Get metadata for a specific binary."""
     conn = _get_connection()
-    cursor = conn.execute(
-        "SELECT * FROM installed_binaries WHERE alias = ?", (alias,)
-    )
+    cursor = conn.execute("SELECT * FROM installed_binaries WHERE alias = ?", (alias,))
     row = cursor.fetchone()
 
     if row is None:
@@ -226,13 +247,23 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         "bin_path": row["bin_path"],
         "alias": row["alias"],
         "crate": row["crate"],
-        "artifacts_cleaned": bool(row["artifacts_cleaned"]) if "artifacts_cleaned" in keys else False,
+        "artifacts_cleaned": bool(row["artifacts_cleaned"])
+        if "artifacts_cleaned" in keys
+        else False,
         "repo_deleted": bool(row["repo_deleted"]) if "repo_deleted" in keys else False,
         "binary_type": row["binary_type"] if "binary_type" in keys else "symlink",
-        "binary_copy_path": row["binary_copy_path"] if "binary_copy_path" in keys else None,
-        "last_build_duration": row["last_build_duration"] if "last_build_duration" in keys else None,
-        "total_build_count": row["total_build_count"] if "total_build_count" in keys else 0,
-        "avg_build_duration": row["avg_build_duration"] if "avg_build_duration" in keys else None,
+        "binary_copy_path": row["binary_copy_path"]
+        if "binary_copy_path" in keys
+        else None,
+        "last_build_duration": row["last_build_duration"]
+        if "last_build_duration" in keys
+        else None,
+        "total_build_count": row["total_build_count"]
+        if "total_build_count" in keys
+        else 0,
+        "avg_build_duration": row["avg_build_duration"]
+        if "avg_build_duration" in keys
+        else None,
     }
 
 
@@ -309,7 +340,7 @@ def get_build_stats(alias: str) -> dict[str, Any] | None:
         SELECT last_build_duration, total_build_count, avg_build_duration
         FROM installed_binaries WHERE alias = ?
         """,
-        (alias,)
+        (alias,),
     )
     row = cursor.fetchone()
 
@@ -339,15 +370,17 @@ def get_all_binaries_full() -> list[dict[str, Any]]:
             "crate": row["crate"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            **{k: row[k] if k in row.keys() else default
-               for k, default in [
-                   ("artifacts_cleaned", False),
-                   ("repo_deleted", False),
-                   ("binary_type", "symlink"),
-                   ("last_build_duration", None),
-                   ("total_build_count", 0),
-                   ("avg_build_duration", None),
-               ]}
+            **{
+                k: row[k] if k in row.keys() else default
+                for k, default in [
+                    ("artifacts_cleaned", False),
+                    ("repo_deleted", False),
+                    ("binary_type", "symlink"),
+                    ("last_build_duration", None),
+                    ("total_build_count", 0),
+                    ("avg_build_duration", None),
+                ]
+            },
         }
         for row in cursor.fetchall()
     ]
@@ -358,7 +391,7 @@ def get_binaries_by_repo(repo_url: str) -> list[dict[str, Any]]:
     conn = _get_connection()
     cursor = conn.execute(
         "SELECT alias, branch, commit_hash, crate FROM installed_binaries WHERE repo_url = ?",
-        (repo_url,)
+        (repo_url,),
     )
 
     return [
@@ -406,6 +439,7 @@ def get_status_summary() -> dict[str, Any]:
 
 # Batch operations for better performance
 
+
 def save_multiple_binaries(binaries: list[dict[str, Any]]) -> None:
     """Save multiple binaries in a single transaction."""
     with _transaction() as conn:
@@ -432,7 +466,7 @@ def save_multiple_binaries(binaries: list[dict[str, Any]]) -> None:
 
 def cleanup_connection() -> None:
     """Clean up thread-local connection (call at end of program)."""
-    conn = getattr(_local, 'connection', None)
+    conn = getattr(_local, "connection", None)
     if conn is not None:
         conn.close()
         _local.connection = None

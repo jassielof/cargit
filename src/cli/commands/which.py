@@ -9,7 +9,10 @@ from rich import print as rprint
 
 from cli.storage import get_binary_metadata
 
+app = typer.Typer()
 
+
+@app.command()
 def which(alias: str = typer.Argument(..., help="Alias of binary to locate")):
     """Show absolute path to installed binary
 

@@ -10,23 +10,28 @@ from rich import print as rprint
 from cli.core import (
     CACHE_DIR,
     CargitError,
-    ensure_dirs,
-    get_repo_path,
-    get_cache_size,
-    format_size,
     clean_all_cache,
     clean_binary_artifacts,
     clean_binary_repo,
     copy_binary_to_safe_location,
+    ensure_dirs,
     find_orphaned_repos,
+    format_size,
+    get_cache_size,
+    get_repo_path,
     install_binary,
 )
 from cli.storage import get_binary_metadata, mark_artifacts_cleaned, mark_repo_deleted
 
+app = typer.Typer()
 
+
+@app.command()
 def clean(
     alias: str | None = typer.Argument(None, help="Alias of binary to clean"),
-    all: bool = typer.Option(False, "--all", help="Remove all cached repos and artifacts"),
+    all: bool = typer.Option(
+        False, "--all", help="Remove all cached repos and artifacts"
+    ),
     artifacts: bool = typer.Option(False, "--artifacts", help="Clean build artifacts"),
     repos: bool = typer.Option(False, "--repos", help="Delete repository"),
     orphaned: bool = typer.Option(False, "--orphaned", help="Remove orphaned repos"),
@@ -54,13 +59,17 @@ def clean(
 def _validate_clean_args(alias, all, artifacts, repos, orphaned):
     mode_count = sum([all, artifacts, repos, orphaned])
     if mode_count == 0:
-        rprint("[red]Error: Must specify one of --all, --artifacts, --repos, or --orphaned[/red]")
+        rprint(
+            "[red]Error: Must specify one of --all, --artifacts, --repos, or --orphaned[/red]"
+        )
         sys.exit(1)
     if mode_count > 1:
         rprint("[red]Error: Can only specify one mode at a time[/red]")
         sys.exit(1)
     if (artifacts or repos) and not alias:
-        rprint("[red]Error: Must specify <alias> when using --artifacts or --repos[/red]")
+        rprint(
+            "[red]Error: Must specify <alias> when using --artifacts or --repos[/red]"
+        )
         sys.exit(1)
     if (all or orphaned) and alias:
         rprint("[red]Error: Cannot specify <alias> with --all or --orphaned[/red]")
@@ -78,13 +87,17 @@ def _clean_all_cache(dry_run: bool):
         rprint("[yellow]Cache is already empty[/yellow]")
         return
 
-    rprint(f"[yellow]This will remove all cached repos and artifacts ({format_size(cache_size)})[/yellow]")
+    rprint(
+        f"[yellow]This will remove all cached repos and artifacts ({format_size(cache_size)})[/yellow]"
+    )
     if not typer.confirm("Are you sure?"):
         rprint("[blue]Aborted[/blue]")
         return
 
     if clean_all_cache():
-        rprint(f"[green]Successfully cleaned cache (freed {format_size(cache_size)})[/green]")
+        rprint(
+            f"[green]Successfully cleaned cache (freed {format_size(cache_size)})[/green]"
+        )
     else:
         rprint("[red]Failed to clean cache[/red]")
         sys.exit(1)
@@ -105,7 +118,9 @@ def _clean_binary_artifacts(alias: str, dry_run: bool):
     artifacts_size = get_cache_size(target_dir) if target_dir.exists() else 0
 
     if dry_run:
-        rprint(f"[yellow]Would clean build artifacts for {alias} ({format_size(artifacts_size)})[/yellow]")
+        rprint(
+            f"[yellow]Would clean build artifacts for {alias} ({format_size(artifacts_size)})[/yellow]"
+        )
         return
 
     if artifacts_size == 0:
@@ -124,7 +139,9 @@ def _clean_binary_artifacts(alias: str, dry_run: bool):
     if clean_binary_artifacts(repo_path):
         install_binary(safe_path, alias, Path(info["install_dir"]), binary_type="copy")
         mark_artifacts_cleaned(alias, str(safe_path))
-        rprint(f"[green]Cleaned artifacts for {alias} (freed {format_size(artifacts_size)})[/green]")
+        rprint(
+            f"[green]Cleaned artifacts for {alias} (freed {format_size(artifacts_size)})[/green]"
+        )
     else:
         rprint(f"[red]Failed to clean artifacts for {alias}")
         sys.exit(1)
@@ -144,7 +161,9 @@ def _clean_binary_repo(alias: str, dry_run: bool):
     repo_size = get_cache_size(repo_path)
 
     if dry_run:
-        rprint(f"[yellow]Would delete repository for {alias} ({format_size(repo_size)})[/yellow]")
+        rprint(
+            f"[yellow]Would delete repository for {alias} ({format_size(repo_size)})[/yellow]"
+        )
         return
 
     binary_path = Path(info["bin_path"])
@@ -160,7 +179,9 @@ def _clean_binary_repo(alias: str, dry_run: bool):
         install_binary(safe_path, alias, Path(info["install_dir"]), binary_type="copy")
         mark_repo_deleted(alias)
         mark_artifacts_cleaned(alias, str(safe_path))
-        rprint(f"[green]Deleted repository for {alias} (freed {format_size(repo_size)})[/green]")
+        rprint(
+            f"[green]Deleted repository for {alias} (freed {format_size(repo_size)})[/green]"
+        )
     else:
         rprint(f"[red]Failed to delete repository for {alias}")
         sys.exit(1)
@@ -173,7 +194,9 @@ def _clean_orphaned_repos(dry_run: bool):
         return
 
     total_size = sum(size for _, size in orphaned_repos)
-    rprint(f"[yellow]Found {len(orphaned_repos)} orphaned repos ({format_size(total_size)}):[/yellow]")
+    rprint(
+        f"[yellow]Found {len(orphaned_repos)} orphaned repos ({format_size(total_size)}):[/yellow]"
+    )
     for repo_path, size in orphaned_repos:
         rprint(f"  - {repo_path} ({format_size(size)})")
 
