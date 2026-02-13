@@ -15,11 +15,15 @@ cargit = "cli:app"
 
 [dependency-groups]
 dev = [
+  "lizard>=1.21.0",
+  "mkdocs-material>=9.7.1",
+  "mkdocstrings[python]>=1.0.3",
+  "pymdown-extensions>=10.20.1",
   "ruff>=0.13.2",
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.17,<0.10.0"]
+requires = ["uv_build>=0.10.0,<0.11.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
