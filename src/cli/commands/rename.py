@@ -69,7 +69,7 @@ def rename(
             )
             source_fallback = Path(old_info["bin_path"])
             if not source_fallback.exists():
-                rprint(f"[red]Error: No source binary found to rename[/red]")
+                rprint("[red]Error: No source binary found to rename[/red]")
                 sys.exit(1)
             shutil.copy2(source_fallback, new_path)
             new_path.chmod(0o755)
