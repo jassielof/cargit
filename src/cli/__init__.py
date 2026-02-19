@@ -26,7 +26,7 @@ app = typer.Typer(
 # Register all commands
 app.add_typer(install_app, no_args_is_help=True)
 app.add_typer(update_app, no_args_is_help=True)
-app.add_typer(list_app, name="list")
+app.add_typer(list_app)
 app.add_typer(status_app)
 app.add_typer(info_app)
 app.add_typer(config_app)

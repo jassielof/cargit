@@ -9,7 +9,7 @@ from cli.utils import display_installed_table
 app = typer.Typer()
 
 
-@app.command()
+@app.command(name="list")
 def list_binaries():
     """List installed binaries"""
     metadata = load_metadata()
